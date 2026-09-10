@@ -31,6 +31,42 @@ otherwise, and whenever the tab regains focus. Coming back to a backgrounded tab
 `requestAnimationFrame` does not run in a hidden tab, so a page that first loaded in the background has no
 frame to build on.
 
+## The sample season
+
+In September the sheet is nearly empty, which makes it a poor thing to show
+anyone. **About this sheet → Show a sample** swaps it for an invented week 10 —
+nine weeks played, a Sunday half-finished, three games live — so it can be
+demonstrated full. `?demo=1` opens straight into it, so the sample can be sent
+rather than demonstrated over a shoulder.
+
+`docs/assets/demo.js` generates it at runtime from a fixed seed rather than
+shipping a second dataset: everything structural is the real 2026 data already
+in `data.js` — schedule, kickoffs, lines, totals, byes, broadcast — and only the
+outcomes are invented. That costs about 4KB instead of another 60, and the seed
+means both phones see the same sample.
+
+Two properties are enforced rather than trusted, because the sample sits on top
+of live shared data:
+
+- **The real season survives underneath.** `real` holds the genuine ledger while
+  the sample is showing; `persist()` and `mergeRemote()` write there, never to
+  the sample, so a snapshot arriving mid-demo lands where it belongs.
+- **Nothing from the sample can leave the device.** Every write path — `setPicks`,
+  `setResult`, `pendMark`, `pullWeek` — checks the flag first. Verified: picks
+  made inside the sample leave `bl.book`, `bl.pend` and Firestore untouched.
+
+## Installing it on a phone
+
+`manifest.webmanifest` plus `sw.js` make it installable — *Add to Home Screen* on
+iOS, *Install app* on Android — after which it opens standalone, with no browser
+chrome, off its own icon.
+
+The service worker is **network first, cache as fallback**. The other way round is
+faster but lets a push sit behind a stale cache for a reload or two, and this is
+edited far more often than it is opened on a train. It only touches same-origin
+`GET`s: ESPN, Google Fonts and Firestore are left alone, since they must never be
+served a stale score.
+
 ## The shared ledger
 
 Picks sync live through Firestore. Project **`boson-line`**, data at
@@ -163,6 +199,9 @@ All 32 pass.
   otherwise, and whenever the tab regains focus.
 - The Line column's second line names the number the market moved *from* (`was PIT -3`) rather than a bare
   delta (`+½`), which nobody could read at a glance.
+- **Clear mine** wipes a week in one press, so it offers an undo for fifteen seconds afterwards. It was
+  added the hard way, after a stray click cleared a real week and it turned out there was no way back
+  except a pick code.
 
 ## Phone layout
 
@@ -177,6 +216,9 @@ turned up and are fixed:
 - The game rows overflowed by 9px because `grid-template-columns: 1fr` refuses to shrink a track below its
   content's min-content width, and the team nickname is `white-space: nowrap`. Tracks are `minmax(0,1fr)`
   and the nickname has `min-width:0`, so it ellipsises instead of pushing the row wide.
+
+The week strip is wider than a phone from week nine on and used to open scrolled to week one, so the week
+you were actually in sat off the end of it. It now centres on the current week.
 
 Tap targets on a phone: pick buttons 46px tall, week buttons 42x40. Wide tables (the ledger, the teams
 list) scroll inside their own `.tblwrap` containers; the page body never scrolls sideways.

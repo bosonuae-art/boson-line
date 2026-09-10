@@ -68,6 +68,31 @@ img{max-width:100%}
 }
 .colhead{font-size:9px; letter-spacing:.14em; text-transform:uppercase; color:var(--ink3); font-weight:500}
 
+/* ------------------------------------------------------------------ sample season
+   Loud enough that nobody mistakes invented results for real ones, quiet enough
+   to live above the sheet without shouting over it. */
+.demobar{position:relative; z-index:1; max-width:1060px; margin:14px auto 0; padding:10px 14px;
+  display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+  border:1px solid color-mix(in srgb, var(--gold) 45%, transparent);
+  background:var(--gold-bg); color:var(--ink2); font-size:12.5px; line-height:1.5}
+.demobar .tag{font-family:"Martian Mono",ui-monospace,monospace; font-size:8.5px; letter-spacing:.16em;
+  text-transform:uppercase; color:var(--gold); border:1px solid currentColor; padding:3px 7px;
+  flex:0 0 auto; align-self:flex-start}
+.demobar .txt{flex:1 1 260px; min-width:0}
+.demobar .txt b{color:var(--ink); font-weight:600}
+.demobar button{flex:0 0 auto; border:1px solid var(--gold); color:var(--gold); background:transparent;
+  padding:6px 12px; font-size:11px; font-weight:500}
+.demobar button:hover{background:color-mix(in srgb, var(--gold) 14%, transparent)}
+
+/* a labelled control inside the About panel */
+.setting{display:flex; gap:16px; align-items:flex-start; flex-wrap:wrap;
+  border-top:1px solid var(--rule); margin-top:16px; padding-top:16px}
+.setting .what{flex:1 1 260px; min-width:0}
+.setting .what b{display:block; color:var(--ink); font-weight:600}
+.setting .what span{display:block; color:var(--ink3); font-size:12.5px; margin-top:3px}
+.setting .what code{font-family:"Martian Mono",ui-monospace,monospace; font-size:11px; color:var(--ink2)}
+.setting button{flex:0 0 auto}
+
 /* ------------------------------------------------------------------ live strip
    One line that answers "what is happening, and is this current?" - which the
    sheet previously made you read sixteen rows to work out. */
@@ -277,6 +302,9 @@ tr.wait td{color:var(--faint)}
 .flash{margin:14px 0 0; border-left:2px solid var(--gold); background:var(--gold-bg); color:var(--gold);
   padding:9px 13px; font-size:12.5px}
 .nudge{margin:16px 0 0; border-left:2px solid var(--rule2); padding:9px 13px; font-size:12.5px; color:var(--ink2)}
+.flash button[data-act="undo"]{border:1px solid var(--gold); color:var(--gold); background:transparent;
+  padding:3px 10px; margin-left:8px; font-size:11px; font-weight:500}
+.flash button[data-act="undo"]:hover{background:color-mix(in srgb, var(--gold) 14%, transparent)}
 
 details.about{margin-top:42px; border-top:1px solid var(--rule); padding-top:14px}
 details.about summary{font-size:12.5px; color:var(--ink3); cursor:pointer; list-style:none}
@@ -313,8 +341,21 @@ details.about b{color:var(--ink); font-weight:600}
   .line,.score{text-align:left}
   .line .sub,.score .sub{display:inline; margin-left:9px}
   .score.now{justify-content:flex-start}
-  .livebar{grid-template-columns:minmax(0,1fr); grid-template-areas:"state" "scores" "meta" "sync"; gap:9px}
-  .lb-meta{justify-content:space-between}
+  /* State and freshness share a row where they fit and wrap where they do not.
+     Fixed grid columns collided here: .lb-state does not wrap, so a long phrase
+     ran straight under the Refresh button. */
+  .livebar{display:flex; flex-wrap:wrap; align-items:center; gap:8px 10px; padding:9px 12px}
+  .lb-state{flex:1 1 auto; min-width:0; white-space:normal}
+  .lb-meta{flex:0 0 auto; margin-left:auto; justify-content:flex-end; gap:8px}
+  .lb-scores{flex:1 1 100%; order:3}
+  .lb-sync{flex:1 1 100%; order:4}
+  .lb-scores:empty{display:none}
+  /* the week head was costing four lines before a single game was visible */
+  .whead{padding-top:18px; gap:4px 14px}
+  .whead .said{margin-right:0; padding-bottom:0; width:100%}
+  .whead .acts{width:100%; overflow-x:auto; white-space:nowrap; scrollbar-width:none; padding-top:2px}
+  .whead .acts::-webkit-scrollbar{display:none}
+  .demobar{margin-top:10px; font-size:12px}
   .resedit{justify-content:flex-start}
   .scoreline{gap:16px; width:100%; margin-left:0}
   .mast-row.one{flex-wrap:wrap; gap:9px}

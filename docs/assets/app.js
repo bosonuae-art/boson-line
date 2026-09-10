@@ -4,6 +4,7 @@
    localStorage either way. */
 import { SCHED, BYES, ACCENTS, SLUG, SEED, SEED_AT } from "./data.js";
 import { connect } from "./store.js";
+import { buildDemo, DEMO_WEEK } from "./demo.js";
 
 /* ------------------------------------------------------------------ static */
 const TEAMS = {
@@ -58,7 +59,7 @@ const state = {
 };
 
 /* live ESPN data: the shipped seed, then anything cached from a real fetch */
-const LIVE = {};
+let LIVE = {};
 Object.keys(SEED).forEach(function(w){ LIVE[w] = SEED[w]; });
 (function(){
   const c = LS.get("bl.live", null);
@@ -66,10 +67,53 @@ Object.keys(SEED).forEach(function(w){ LIVE[w] = SEED[w]; });
   Object.keys(c).forEach(function(w){ if (c[w] && c[w].games) LIVE[w] = c[w]; });
 })();
 
+/* ------------------------------------------------------------------ sample season
+   A setting swaps the whole sheet for a fabricated week 10 so it can be shown to
+   someone in September. Two things must hold while it is on: the real season has
+   to survive untouched underneath, and not one byte may reach the shared sheet.
+   Both are enforced here rather than trusted to the caller - `real` holds the
+   genuine ledger, every write path checks demo.on, and the demo clock replaces
+   Date.now() everywhere the season's own sense of time is read. */
+const demo = {on: false, now: 0};
+const real = {live: null, book: null, touch: null};
+
+function nowMs(){ return demo.on ? demo.now : Date.now(); }
+/* Picks and results always persist against the genuine ledger, never the sample. */
+function realBook(){ return demo.on ? real.book : state.book; }
+
+function setDemo(on, silent){
+  on = !!on;
+  if (on === demo.on) return;
+  if (on){
+    const d = buildDemo(SEED, BY_WEEK, WEEKS);
+    real.live = LIVE;
+    real.book = state.book;
+    real.touch = {bo: TOUCH.bo, dad: TOUCH.dad};
+    demo.on = true;
+    demo.now = d.now;
+    LIVE = d.live;
+    state.book = d.book;
+    TOUCH.bo = d.touch.bo; TOUCH.dad = d.touch.dad;
+    state.week = DEMO_WEEK;
+  } else {
+    demo.on = false;
+    LIVE = real.live || {};
+    state.book = real.book || {};
+    TOUCH.bo = (real.touch && real.touch.bo) || 0;
+    TOUCH.dad = (real.touch && real.touch.dad) || 0;
+    real.live = real.book = real.touch = null;
+    state.week = defaultWeek();
+  }
+  state.now = nowMs();
+  LS.set("bl.demo", demo.on);
+  if (!silent) render();
+  if (!demo.on) pullWeek(state.week, true);
+}
+
 const SEASON_START = Date.parse("2026-09-09T00:00:00Z");
 function weekEnd(wk){ return SEASON_START + (wk * 7) * 86400000; }
 function weekByDate(){
-  const days = Math.floor((Date.now() - SEASON_START) / 86400000);
+  const days = Math.floor((nowMs() - SEASON_START) / 86400000);
   return Math.min(18, Math.max(1, Math.floor(days / 7) + 1));
 }
 function defaultWeek(){
@@ -80,7 +124,7 @@ function defaultWeek(){
       const lv = liveOf(w, gs[j].key);
       if (lv && lv.k){ const t = Date.parse(lv.k); if (t > last) last = t; }
     }
-    if (last && Date.now() < last + 4*3600*1000) return w;
+    if (last && nowMs() < last + 4*3600*1000) return w;
   }
   return weekByDate();
 }
@@ -143,6 +187,7 @@ function setPulling(delta){
   if (el) el.classList.toggle("on", pulling > 0);
 }
 async function pullWeek(wk, force){
+  if (demo.on) return;            /* the sample never phones ESPN */
   const at = lastPull[wk];
   const maxAge = weekIsLive(wk) ? 25000 : 600000;
   if (!force && at && Date.now() - at < maxAge) return;
@@ -269,7 +314,7 @@ function seasonStats(){
 }
 function pct(n, d){ return d ? (n / d * 100).toFixed(1) + "%" : "-"; }
 function ago(ms){
-  const d = Date.now() - ms;
+  const d = nowMs() - ms;
   if (d < 0 || d < 45000) return "just now";
   if (d < 90000) return "a minute ago";
   if (d < 3600000) return Math.round(d / 60000) + " min ago";
@@ -328,7 +373,7 @@ function liveWeek(){
 
 /* ------------------------------------------------------------------ writing */
 let store = null;
-function persist(){ LS.set("bl.book", state.book); }
+function persist(){ LS.set("bl.book", realBook()); }
 
 /* Edits this device has made but has not yet seen come back from the shared
    sheet. mergeRemote replaces a week wholesale, so without this a pick made
@@ -338,6 +383,7 @@ function persist(){ LS.set("bl.book", state.book); }
 const PEND = LS.get("bl.pend", {}) || {};
 function pendSave(){ LS.set("bl.pend", PEND); }
 function pendMark(wk, key, who, val){
+  if (demo.on) return;            /* sample edits are never sent anywhere */
   const w = PEND[wk] = PEND[wk] || {};
   const c = w[key] = w[key] || {};
   c[who] = val || null;
@@ -414,22 +460,37 @@ function setPicks(wk, obj){
     Object.keys(patch).forEach(function(who){ pendMark(wk, k, who, patch[who]); });
   });
   render();
-  if (store) store.savePicks(wk, obj, state.me).catch(function(){});
+  if (store && !demo.on) store.savePicks(wk, obj, state.me).catch(function(){});
 }
 function setResult(wk, key, val){
   const b = state.book[wk] = state.book[wk] || {week:wk, picks:{}, results:{}};
   b.results = b.results || {};
   if (val === null) delete b.results[key]; else b.results[key] = val;
   persist(); render();
-  if (store) store.saveResult(wk, key, val, state.me).catch(function(){});
+  if (store && !demo.on) store.saveResult(wk, key, val, state.me).catch(function(){});
 }
 let flashTimer = null;
-function flash(msg){
+let undoAction = null;
+/* An offer to undo, where the message alone would leave you stuck. Cheaper than
+   a confirm on every press, and it does not put a dialog between you and a
+   button you meant to hit ninety-nine times out of a hundred. */
+function flash(msg, undoLabel, fn){
   const n = document.getElementById("notice");
-  n.innerHTML = '<div class="flash">' + esc(msg) + '</div>';
+  undoAction = fn || null;
+  n.innerHTML = '<div class="flash">' + esc(msg) +
+    (fn ? ' <button type="button" data-act="undo">' + esc(undoLabel || "Undo") + '</button>' : '') +
+    '</div>';
   clearTimeout(flashTimer);
-  flashTimer = setTimeout(function(){ flashTimer = null; n.innerHTML = ""; render(); }, 5000);
+  flashTimer = setTimeout(function(){
+    flashTimer = null; undoAction = null; n.innerHTML = ""; render();
+  }, fn ? 15000 : 5000);
 }
+document.getElementById("notice").addEventListener("click", function(e){
+  if (!e.target.closest('button[data-act="undo"]')) return;
+  const fn = undoAction;
+  undoAction = null;
+  if (fn) fn();
+});
 
 /* ------------------------------------------------------------------ pick codes */
 function b64(bytes){
@@ -519,12 +580,17 @@ function renderScoreline(){
 
 /* ------------------------------------------------------------------ render: picks */
 function renderWeeks(){
-  document.getElementById("weeks").innerHTML = WEEKS.map(function(w){
+  const el = document.getElementById("weeks");
+  el.innerHTML = WEEKS.map(function(w){
     const s = weekStats(w);
     const done = s.games && s.decided === s.games;
     return '<button type="button" data-w="' + w + '"' + (done ? ' class="done"' : '') +
            ' aria-current="' + (w === state.week) + '">' + w + '</button>';
   }).join("");
+  /* The strip is wider than a phone from week nine on, and it opens at week one,
+     so the week you are actually in scrolls off the end. Centre it. */
+  const cur = el.querySelector('button[aria-current="true"]');
+  if (cur) el.scrollLeft = Math.max(0, cur.offsetLeft - (el.clientWidth - cur.offsetWidth) / 2);
 }
 function renderWeekHead(){
   const wk = state.week, s = weekStats(wk);
@@ -583,7 +649,10 @@ function renderSync(){
   const el = document.getElementById("lbSync");
   if (!el) return;
   const bits = [];
-  if (!state.shared){
+  /* The sample stands in for a working shared sheet, so it reports its own
+     state rather than whatever the real connection happens to be doing behind
+     it. The banner above already says none of this is real. */
+  if (!state.shared && !demo.on){
     el.className = "lb-sync off";
     el.innerHTML = '<b>Not shared.</b> Picks are saved on this device only &mdash; ' +
       'use the codes at the bottom to swap sheets by text.';
@@ -603,15 +672,15 @@ function renderSync(){
      picked yet" while their column is full is worse than saying nothing. */
   const ws = weekStats(state.week);
   ["bo","dad"].forEach(function(w){
-    const label = NAME[w] + (w === state.me ? " (you)" : "");
+    const you = (w === state.me);
+    const label = you ? "You" : NAME[w];
     const n = (w === "bo") ? ws.boIn : ws.dadIn;
-    /* The count is for the week on screen; the stamp is the newest change
-       anywhere in the season. Saying "nothing this week yet, last change just
-       now" reads as a contradiction, so the two are worded apart. */
-    if (n) bits.push(label + " " + n + " of " + ws.games + " this week" +
-                     (TOUCH[w] ? ", last change " + ago(TOUCH[w]) : ""));
-    else if (TOUCH[w]) bits.push(label + " nothing in week " + state.week +
-                     " yet, last active " + ago(TOUCH[w]));
+    /* The week is named directly above, so "this week" is noise. A timestamp on
+       your own row is noise too - you know when you last touched it; what you
+       cannot know without being told is when the other person did. */
+    const when = (!you && TOUCH[w]) ? ", " + ago(TOUCH[w]) : "";
+    if (n) bits.push(label + " " + n + " of " + ws.games + when);
+    else if (TOUCH[w] && !you) bits.push(label + " none here yet, last active " + ago(TOUCH[w]));
     else bits.push(label + " nothing yet");
   });
   el.innerHTML = bits.join(' <span class="dot">&middot;</span> ');
@@ -710,9 +779,20 @@ function renderGames(){
     '</div>';
   }).join("");
 }
+function renderDemoBar(){
+  const el = document.getElementById("demobar");
+  el.hidden = !demo.on;
+  if (!demo.on) return;
+  el.innerHTML =
+    '<span class="tag">Sample</span>' +
+    '<span class="txt"><b>This is a made-up season.</b> Week ' + DEMO_WEEK + ' of a year that has not ' +
+    'happened, so the sheet can be shown full. Nothing here is saved or sent to the shared sheet.</span>' +
+    '<button type="button" id="demoOff">Back to the real sheet</button>';
+}
 function renderNotice(){
   if (flashTimer) return;
-  document.getElementById("notice").innerHTML = state.me ? "" :
+  /* One banner at a time: in the sample, the sample explains itself. */
+  document.getElementById("notice").innerHTML = (state.me || demo.on) ? "" :
     '<div class="nudge">Say whether you&rsquo;re <b>Bo</b> or <b>Dad</b> up top to start picking. ' +
     'Until then both columns stay sealed.</div>';
   document.getElementById("mast").classList.toggle("unset", !state.me);
@@ -884,7 +964,13 @@ let queued = false;
 function render(){
   if (queued) return;
   queued = true;
-  requestAnimationFrame(function(){
+  /* A hidden tab never runs requestAnimationFrame, so a render queued there sits
+     unpainted and, worse, blocks every later render behind `queued`. Fall back to
+     a timer when hidden so the DOM always agrees with state, looked at or not. */
+  const schedule = document.hidden
+    ? function(fn){ setTimeout(fn, 16); }
+    : function(fn){ requestAnimationFrame(fn); };
+  schedule(function(){
     queued = false;
     document.getElementById("who-bo").setAttribute("aria-pressed", String(state.me === "bo"));
     document.getElementById("who-dad").setAttribute("aria-pressed", String(state.me === "dad"));
@@ -894,8 +980,12 @@ function render(){
     const rb = document.getElementById("resBtn");
     rb.setAttribute("aria-pressed", String(state.resMode));
     rb.textContent = state.resMode ? "Done" : "Enter results";
+    const db = document.getElementById("demoBtn");
+    db.setAttribute("aria-pressed", String(demo.on));
+    db.textContent = demo.on ? "Hide sample" : "Show sample";
 
     renderScoreline();
+    renderDemoBar();
     renderNotice();
     if (state.tab === "picks"){
       renderWeeks(); renderWeekHead(); renderLiveBar(); renderSwap();
@@ -956,6 +1046,10 @@ document.getElementById("weeks").addEventListener("click", function(e){
   const b = e.target.closest("button[data-w]");
   if (b){ state.week = Number(b.dataset.w); render(); pullWeek(state.week); }
 });
+document.getElementById("demoBtn").addEventListener("click", function(){ setDemo(!demo.on); });
+document.getElementById("demobar").addEventListener("click", function(e){
+  if (e.target.closest("#demoOff")) setDemo(false);
+});
 document.getElementById("games").addEventListener("click", function(e){
   const btn = e.target.closest("button[data-act]"), row = e.target.closest(".game");
   if (!btn || !row) return;
@@ -999,14 +1093,21 @@ document.getElementById("fillFav").addEventListener("click", function(){
 });
 document.getElementById("clearWk").addEventListener("click", function(){
   if (!state.me){ flash("Say who you are first."); return; }
-  const wk = state.week, o = {};
+  const wk = state.week, me = state.me, o = {}, prev = {};
   let n = 0;
   (BY_WEEK[wk] || []).forEach(function(g){
-    if (isLocked(wk, g.key) || !pickOf(wk, g.key, state.me)) return;
-    const p = {}; p[state.me] = null; o[g.key] = p; n++;
+    if (isLocked(wk, g.key) || !pickOf(wk, g.key, me)) return;
+    prev[g.key] = pickOf(wk, g.key, me);
+    const p = {}; p[me] = null; o[g.key] = p; n++;
   });
   if (!n){ flash("No open picks to clear this week."); return; }
   setPicks(wk, o);
+  flash("Cleared " + n + " pick" + (n === 1 ? "" : "s") + " in week " + wk + ".", "Undo", function(){
+    const back = {};
+    Object.keys(prev).forEach(function(k){ const p = {}; p[me] = prev[k]; back[k] = p; });
+    setPicks(wk, back);
+    flash("Put back " + n + " pick" + (n === 1 ? "" : "s") + ".");
+  });
 });
 document.getElementById("copyMine").addEventListener("click", function(){
   if (!state.me){ flash("Say who you are first - the code is stamped with your name."); return; }
@@ -1060,16 +1161,18 @@ function mergeRemote(wk, doc, confirmed){
   });
 
   const t = (doc && doc.touch) || {};
+  const marks = demo.on ? real.touch : TOUCH;
   ["bo","dad"].forEach(function(w){
     const ms = tsMillis(t[w]);
-    if (ms > TOUCH[w]) TOUCH[w] = ms;
+    if (marks && ms > marks[w]) marks[w] = ms;
   });
 
   /* Anything the other person changed since the last snapshot gets a moment of
      highlight. Only theirs - your own taps do not need announcing back to you. */
-  const before = (state.book[wk] && state.book[wk].picks) || {};
+  const target = realBook();
+  const before = (target[wk] && target[wk].picks) || {};
   const them = state.me === "bo" ? "dad" : state.me === "dad" ? "bo" : null;
-  if (them){
+  if (them && !demo.on){
     const seen = {};
     Object.keys(picks).concat(Object.keys(before)).forEach(function(k){
       if (seen[k]) return;
@@ -1080,13 +1183,13 @@ function mergeRemote(wk, doc, confirmed){
   }
 
   if (confirmed) pendReconcile(wk, picks);
-  state.book[wk] = {week:wk, picks:pendApply(wk, picks), results:results};
+  target[wk] = {week:wk, picks:pendApply(wk, picks), results:results};
   persist();
 }
 function localPicksByWeek(){
-  const out = {};
+  const out = {}, src = realBook();
   WEEKS.forEach(function(w){
-    const b = state.book[w];
+    const b = src[w];
     if (!b || !b.picks) return;
     const keys = Object.keys(b.picks);
     if (keys.length) out[w] = b.picks;
@@ -1104,16 +1207,23 @@ function onSwapCopyChange(connected){
 function start(){
   state.book = LS.get("bl.book", {}) || {};
   state.week = defaultWeek();
+
+  /* ?demo=1 makes the sample linkable, so it can be sent rather than demonstrated
+     over someone's shoulder. Otherwise it is remembered from last time. */
+  let asked = false;
+  try { asked = new URLSearchParams(location.search).get("demo") === "1"; } catch(e){}
+  if (asked || location.hash === "#demo" || LS.get("bl.demo", false) === true) setDemo(true, true);
+
   render();
   pullWeek(state.week, true);
-  setInterval(function(){ state.now = Date.now(); render(); }, 30000);
+  setInterval(function(){ state.now = nowMs(); render(); }, 30000);
   setInterval(function(){ if (state.tab === "picks") pullWeek(state.week); }, 20000);
   document.addEventListener("visibilitychange", function(){
     if (document.hidden) return;
     /* Coming back to the tab: redraw before waiting on the network. A page that
        first loaded in the background has no frame yet, because requestAnimationFrame
        does not run there, and the clock has moved on regardless. */
-    state.now = Date.now();
+    state.now = nowMs();
     render();
     pullWeek(state.week);
   });
@@ -1134,6 +1244,9 @@ function start(){
     onSave: function(kind){ state.saving = kind; render(); }
   }).then(function(s){
     store = s;
+    if ("serviceWorker" in navigator){
+      navigator.serviceWorker.register("./sw.js").catch(function(){});
+    }
     /* Anything picked before the connection came up has never left this phone.
        Send it now rather than leaving it stranded here. */
     if (s) flushPending(); else purgePending();
