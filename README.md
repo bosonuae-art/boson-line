@@ -88,7 +88,11 @@ Three things make the sync trustworthy rather than merely present:
   so reconciling on that echo would let *"Everything saved"* lie; the app waits for a snapshot with no
   writes still in flight.
 - **Failed writes retry** with backoff instead of being dropped, and anything still stranded on the phone
-  is flushed the moment a connection is established.
+  is flushed once the sheet has been read - never before it.
+- **Stale intent expires.** Every pending edit carries the moment it was made, and is dropped when the
+  sheet already agrees, when the sheet was written *after* the edit was made (the newer intention wins),
+  or when it is more than twelve hours old. Without this, `bl.pend` replayed on every load: a week cleared
+  by a stray click came back from the dead on the next page open and wiped a freshly restored one. Twice.
 
 A pick arriving from the other phone gets one beat of highlight on its row, so a change that lands while
 you are looking at the week is visible rather than merely present.

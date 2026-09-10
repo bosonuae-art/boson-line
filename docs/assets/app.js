@@ -381,12 +381,27 @@ function persist(){ LS.set("bl.book", realBook()); }
    would be drawn on screen, then silently erased by the next snapshot. Pending
    edits sit on top of whatever arrives until the server echoes them back. */
 const PEND = LS.get("bl.pend", {}) || {};
+/* Every pending edit carries the moment it was made. Without that stamp there is
+   no way to tell a genuine unsent edit from an intent the sheet has long since
+   moved past - and replaying the latter on load silently overwrites whatever the
+   other person did in between. Anything older than this is not anyone's live
+   intention any more. */
+const PEND_MAX_AGE = 12 * 3600 * 1000;
 function pendSave(){ LS.set("bl.pend", PEND); }
+function pendVal(cell, who){
+  const e = cell && cell[who];
+  if (e === undefined) return undefined;
+  return (e && typeof e === "object" && "v" in e) ? e.v : (e || null);
+}
+function pendAt(cell, who){
+  const e = cell && cell[who];
+  return (e && typeof e === "object" && typeof e.t === "number") ? e.t : 0;
+}
 function pendMark(wk, key, who, val){
   if (demo.on) return;            /* sample edits are never sent anywhere */
   const w = PEND[wk] = PEND[wk] || {};
   const c = w[key] = w[key] || {};
-  c[who] = val || null;
+  c[who] = {v: val || null, t: Date.now()};
   pendSave();
 }
 function pendCount(){
@@ -396,14 +411,24 @@ function pendCount(){
   });
   return n;
 }
-function pendReconcile(wk, remotePicks){
+function pendReconcile(wk, remotePicks, remoteAt){
   const w = PEND[wk];
   if (!w) return;
+  const now = Date.now();
   Object.keys(w).forEach(function(key){
     const cell = w[key];
     Object.keys(cell).forEach(function(who){
+      const want = pendVal(cell, who) || null;
+      const at = pendAt(cell, who);
       const remote = (remotePicks[key] && remotePicks[key][who]) || null;
-      if ((cell[who] || null) === remote) delete cell[who];
+      /* Drop it when the sheet already agrees; when the sheet was written after
+         this edit was made, in which case the sheet is the newer intention and
+         wins; or when it is simply too old to be anybody's intention. Entries
+         saved before stamps existed have at = 0 and fall out here. */
+      const confirmed  = (want === remote);
+      const superseded = remoteAt > 0 && remoteAt > at;
+      const stale      = (now - at) > PEND_MAX_AGE;
+      if (confirmed || superseded || stale) delete cell[who];
     });
     if (!Object.keys(cell).length) delete w[key];
   });
@@ -417,7 +442,8 @@ function pendApply(wk, picks){
     if (!KEYS_BY_WEEK[wk] || !KEYS_BY_WEEK[wk][key]) return;
     const cell = Object.assign({}, picks[key]);
     Object.keys(w[key]).forEach(function(who){
-      if (w[key][who]) cell[who] = w[key][who]; else delete cell[who];
+      const v = pendVal(w[key], who);
+      if (v) cell[who] = v; else delete cell[who];
     });
     if (Object.keys(cell).length) picks[key] = cell; else delete picks[key];
   });
@@ -429,15 +455,18 @@ function purgePending(){
   Object.keys(PEND).forEach(function(k){ delete PEND[k]; });
   pendSave();
 }
+/* Only ever called once the shared sheet has been read and pending edits have
+   been reconciled against it, so what goes up is what genuinely has not landed. */
 function flushPending(){
+  if (!store) return;
   Object.keys(PEND).forEach(function(wk){
     const obj = {};
     Object.keys(PEND[wk]).forEach(function(key){
       const cell = {};
-      Object.keys(PEND[wk][key]).forEach(function(who){ cell[who] = PEND[wk][key][who]; });
+      Object.keys(PEND[wk][key]).forEach(function(who){ cell[who] = pendVal(PEND[wk][key], who); });
       if (Object.keys(cell).length) obj[key] = cell;
     });
-    if (Object.keys(obj).length && store) store.savePicks(Number(wk), obj, state.me).catch(function(){});
+    if (Object.keys(obj).length) store.savePicks(Number(wk), obj, state.me).catch(function(){});
   });
 }
 function applyPicks(wk, obj){
@@ -1182,7 +1211,7 @@ function mergeRemote(wk, doc, confirmed){
     });
   }
 
-  if (confirmed) pendReconcile(wk, picks);
+  if (confirmed) pendReconcile(wk, picks, tsMillis(doc && doc.updatedAt));
   target[wk] = {week:wk, picks:pendApply(wk, picks), results:results};
   persist();
 }
@@ -1232,9 +1261,21 @@ function start(){
      mergeRemote replaces a week wholesale, so reading local picks lazily would
      read them back after they had already been overwritten. */
   const carried = localPicksByWeek();
+  let flushed = false;
   connect({
     seed: function(){ return carried; },
-    onWeek: function(wk, doc, confirmed){ mergeRemote(wk, doc, confirmed); render(); },
+    onWeek: function(wk, doc, confirmed){
+      mergeRemote(wk, doc, confirmed);
+      /* Wait for the sheet to have been read before sending anything up. Flushing
+         on connect - before any snapshot - meant a stale local edit was pushed
+         with nothing to check it against, which is how a cleared week came back
+         from the dead and wiped a restored one. */
+      if (confirmed && !flushed){
+        flushed = true;
+        setTimeout(flushPending, 0);
+      }
+      render();
+    },
     onStatus: function(kind, txt){
       state.shared = (kind === "live");
       setStatus(kind, txt);
@@ -1247,9 +1288,7 @@ function start(){
     if ("serviceWorker" in navigator){
       navigator.serviceWorker.register("./sw.js").catch(function(){});
     }
-    /* Anything picked before the connection came up has never left this phone.
-       Send it now rather than leaving it stranded here. */
-    if (s) flushPending(); else purgePending();
+    if (!s) purgePending();
     render();
   }).catch(function(){ purgePending(); render(); });
 }

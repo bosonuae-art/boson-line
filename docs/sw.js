@@ -6,7 +6,7 @@
    is edited far more often than it is opened on a train. Only same-origin GETs
    are touched: ESPN, Google Fonts and Firestore are left to the browser, which
    already handles their caching and must not be served a stale score. */
-const VERSION = "bl-2026-09-1";
+const VERSION = "bl-2026-09-2";
 const SHELL = [
   "./", "./index.html", "./manifest.webmanifest",
   "./assets/styles.css", "./assets/app.js", "./assets/store.js",
