@@ -19,25 +19,32 @@ The artifact came first and is kept because it still works. The Pages site exist
 **the artifact sandbox blocks every network call** — no `fetch`, no external images — which is
 also why a `db`-backed artifact can't be link-shared at all. A plain static page has neither limit.
 
-## Finishing the Firestore setup
+## The shared ledger
 
-Picks sync through Firestore when `docs/config.js` names a project. Until then the site runs on
-`localStorage` and the season pick-code, and the status pill in the header reads *On this device*.
+Picks sync live through Firestore. Project **`boson-line`**, data at
+`seasons/2026/weeks/w1` … `w18`, each `{ picks: {AWAY@HOME: {bo, dad}}, results: {...}, updatedAt }`.
+The header pill reads *Shared sheet* when it's connected and *On this device* when it isn't; the app is
+fully usable either way, and the season pick-code still works as a backup or for moving to a new phone.
 
-1. [console.firebase.google.com](https://console.firebase.google.com) → **Add project**
-2. **Build → Firestore Database → Create database → production mode**
-3. **Build → Authentication → Sign-in method → enable Anonymous**
-4. **⚙ Project settings → General → Your apps → Web (`</>`)** → register → copy `firebaseConfig`
-5. Paste it into `docs/config.js`, replacing `export const firebaseConfig = null;`
-6. **Firestore → Rules** → paste `firestore.rules` from this repo → Publish
-7. Commit and push; Pages redeploys in about a minute
+**There is no sign-in.** Anonymous auth was the obvious thing to require, but it is not a real gate —
+anyone can mint an anonymous token in one call — and enabling it meant turning on Identity Platform, a
+separate paid product, for no security gain. `firestore.rules` carries the restriction instead: a caller
+can only touch those 18 documents, can only store the three fields the app writes, and is refused
+everywhere else in the project. Verified against the live project:
 
-The config is safe to commit — it identifies the project, it does not grant access. `firestore.rules`
-is what decides who may read and write. See the comments in that file for how to tighten it from
-"anyone signed in anonymously" to two named accounts.
+| Request | Result |
+|---|---|
+| write a valid week (`w2`, `picks`) | accepted |
+| write a bogus week id (`w99`) | rejected |
+| write an unknown field | rejected |
+| write another collection | rejected |
+| write another season (`2027`) | rejected |
 
-Data model: `seasons/2026/weeks/w1` … `w18`, each `{ picks: {AWAY@HOME: {bo, dad}}, results: {...}, updatedAt }`.
-On first connect, if the shared sheet is empty and the device is carrying a season, it pushes it up once.
+The practical protection for a family sheet is that the URL is not advertised. To lock it down properly:
+enable Google sign-in in the Firebase console, gate the rules on the two account IDs (there's a commented
+example in `firestore.rules`), and have `store.js` sign in before it reads. The API key in `docs/config.js`
+is a Firebase web key and is meant to ship in client code; it can be narrowed further with an HTTP-referrer
+restriction in the Cloud console under APIs & Services → Credentials.
 
 ## What's here
 

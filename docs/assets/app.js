@@ -850,8 +850,12 @@ function start(){
     if (!document.hidden) pullWeek(state.week);
   });
 
+  /* Snapshot what this device is carrying BEFORE any remote snapshot lands.
+     mergeRemote replaces a week wholesale, so reading local picks lazily would
+     read them back after they had already been overwritten. */
+  const carried = localPicksByWeek();
   connect({
-    seed: localPicksByWeek,
+    seed: function(){ return carried; },
     onWeek: function(wk, doc){ mergeRemote(wk, doc); render(); },
     onStatus: function(kind, txt){
       setStatus(kind, txt);
