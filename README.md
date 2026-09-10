@@ -88,6 +88,23 @@ All 32 pass.
 - The Pages build refetches the viewed week every 30s while a game in it is live, every 10 minutes
   otherwise, and whenever the tab regains focus.
 
+## Phone layout
+
+Checked at 390x844 and 360x780 by framing the site in same-origin iframes at those widths (media queries
+evaluate against the frame's viewport) and measuring `scrollWidth` against `clientWidth`, rather than
+eyeballing screenshots. Both widths now report zero horizontal overflow on all three tabs. Two real bugs
+turned up and are fixed:
+
+- The masthead's second row overflowed by 24px at a 345px viewport, putting a horizontal scrollbar under
+  the whole page and clipping the *Dad* button. The "Picking as" label now hides below 430px and the row
+  wraps instead of overflowing.
+- The game rows overflowed by 9px because `grid-template-columns: 1fr` refuses to shrink a track below its
+  content's min-content width, and the team nickname is `white-space: nowrap`. Tracks are `minmax(0,1fr)`
+  and the nickname has `min-width:0`, so it ellipsises instead of pushing the row wide.
+
+Tap targets on a phone: pick buttons 46px tall, week buttons 42x40. Wide tables (the ledger, the teams
+list) scroll inside their own `.tblwrap` containers; the page body never scrolls sideways.
+
 ## Design
 
 The visual system follows `C:\Projects\portfolio-website\docs\DESIGN.md`: every neutral tinted toward the

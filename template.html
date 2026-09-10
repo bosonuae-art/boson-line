@@ -146,10 +146,10 @@ img{max-width:100%}
 .when .b{display:block; color:var(--ink3)}
 .when .note{display:block; color:var(--gold); letter-spacing:.06em}
 
-.matchup{display:grid; grid-template-columns:1fr 16px 1fr; align-items:stretch}
+.matchup{display:grid; grid-template-columns:minmax(0,1fr) 16px minmax(0,1fr); align-items:stretch}
 .matchup .at{display:flex; align-items:center; justify-content:center; font-size:9px; color:var(--ink3);
   font-family:"Martian Mono",monospace}
-.pk{display:flex; align-items:center; gap:9px; width:100%; padding:7px 9px; min-height:46px;
+.pk{display:flex; align-items:center; gap:9px; width:100%; min-width:0; padding:7px 9px; min-height:46px;
   border:1px solid var(--rule); border-radius:2px; background:var(--raise);
   transition:background .16s, border-color .16s}
 .pk:hover:not(:disabled){border-color:var(--rule2); background:var(--sheet)}
@@ -158,7 +158,7 @@ img{max-width:100%}
 .lg.dk{display:none}
 .pk .code{font-size:13px; font-weight:600; letter-spacing:-.03em; min-width:38px}
 .pk .nick{font-size:12.5px; color:var(--ink3); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
-  font-family:"Public Sans",sans-serif}
+  min-width:0; font-family:"Public Sans",sans-serif}
 .pk.mine{border-color:currentColor; box-shadow:inset 2px 0 0 currentColor}
 .pk.mine.bo{color:var(--bo); background:var(--bo-bg)}
 .pk.mine.dad{color:var(--dad); background:var(--dad-bg)}
@@ -274,6 +274,26 @@ details.about b{color:var(--ink); font-weight:600}
   .bloom{display:none}
 }
 @media (prefers-reduced-motion:reduce){*{transition:none !important; animation:none !important}}
+
+/* ------------------------------------------------------------------ narrow phones
+   The masthead's second row (tabs + status + identity) is the one thing that
+   outgrows a small handset: at a 345px viewport it pushed the page 24px wide and
+   put a horizontal scrollbar under everything. Drop the "Picking as" label, tighten
+   the tab gap, and let the row wrap rather than overflow. */
+@media (max-width:840px){
+  .mast-row{gap:10px}
+  .mast-row.two{flex-wrap:wrap; row-gap:0}
+}
+@media (max-width:430px){
+  .ident .lab{display:none}
+  .weeks button{padding:10px 0 11px; min-width:42px}   /* thumb-sized week switching */
+  .tabs{gap:14px}
+  .mast-row{padding-inline:16px}
+  .wrap{padding-inline:16px}
+  .whead h2{font-size:24px}
+  .word{font-size:19px}
+  .word .yr{margin-left:7px}
+}
 </style>
 
 <div class="atmos" aria-hidden="true"></div>
