@@ -62,11 +62,59 @@ img{max-width:100%}
 
 /* the mono voice: eyebrows, column heads, codes and figures - nothing else */
 .mono, .colhead, .sc .n, .sc .v, .when, .ledger, .line, .score, .weeks button,
-.pk .code, td.n, th, .resedit, .live, .stamp{
+.pk .code, td.n, th, .resedit, .live, .stamp, .livebar{
   font-family:"Martian Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   font-variant-numeric:tabular-nums;
 }
 .colhead{font-size:9px; letter-spacing:.14em; text-transform:uppercase; color:var(--ink3); font-weight:500}
+
+/* ------------------------------------------------------------------ live strip
+   One line that answers "what is happening, and is this current?" - which the
+   sheet previously made you read sixteen rows to work out. */
+.livebar{display:grid; gap:8px 16px; align-items:center; margin-top:14px;
+  grid-template-columns:auto minmax(0,1fr) auto; grid-template-areas:"state scores meta" "sync sync sync";
+  border:1px solid var(--rule2); border-left:2px solid var(--rule2);
+  background:var(--sheet); padding:10px 14px; font-size:10.5px}
+.livebar.on{border-left-color:var(--live)}
+.lb-state{grid-area:state; display:flex; align-items:center; gap:7px; color:var(--ink2);
+  letter-spacing:.04em; white-space:nowrap}
+.lb-state i{width:6px; height:6px; border-radius:50%; background:var(--faint); flex:0 0 auto}
+.livebar.on .lb-state{color:var(--live)}
+.livebar.on .lb-state i{background:currentColor; animation:blip 1.9s infinite}
+.lb-scores{grid-area:scores; display:flex; gap:8px; overflow-x:auto; scrollbar-width:none;
+  min-width:0; padding-bottom:1px}
+.lb-scores::-webkit-scrollbar{display:none}
+.lb-scores .chip{display:inline-flex; align-items:baseline; gap:5px; white-space:nowrap;
+  border:1px solid var(--rule); background:var(--raise); padding:3px 8px; color:var(--ink2)}
+.lb-scores .chip b{color:var(--ink); font-weight:600}
+.lb-scores .chip i{font-style:normal; color:var(--live); font-size:9px; letter-spacing:.06em}
+.lb-meta{grid-area:meta; display:flex; align-items:center; gap:10px; white-space:nowrap}
+.lb-meta .fresh{color:var(--ink3); font-size:9.5px; letter-spacing:.05em}
+.refresh{border:1px solid var(--rule2); padding:4px 10px; font-size:9px; letter-spacing:.14em;
+  text-transform:uppercase; color:var(--ink2); background:var(--raise)}
+.refresh:hover{border-color:var(--gold); color:var(--gold)}
+.lb-sync{grid-area:sync; border-top:1px solid var(--rule); padding-top:8px; color:var(--ink3);
+  font-size:9.5px; letter-spacing:.04em; line-height:1.6}
+.lb-sync b{font-weight:500; color:var(--ink2)}
+.lb-sync b.ok{color:var(--hit)}
+.lb-sync b.warn{color:var(--live)}
+.lb-sync .dot{color:var(--faint); margin:0 2px}
+
+/* a pick arriving from the other phone gets one beat of attention */
+@keyframes landed{
+  0%{background:color-mix(in srgb, var(--gold) 20%, transparent)}
+  100%{background:transparent}
+}
+.game.justin{animation:landed 2.4s ease-out}
+.score.now{display:flex; align-items:baseline; gap:4px 6px; justify-content:flex-end;
+  flex-wrap:wrap; font-weight:600}
+.score.now b, .score.now .sub{white-space:nowrap; font-weight:inherit}
+.score.now .pulse{width:5px; height:5px; border-radius:50%; background:currentColor;
+  animation:blip 1.9s infinite; flex:0 0 auto; align-self:center}
+.score.now .sub{display:inline; font-weight:400}
+@media (prefers-reduced-motion:reduce){
+  .game.justin{background:color-mix(in srgb, var(--gold) 12%, transparent)}
+}
 
 /* ------------------------------------------------------------------ masthead */
 .mast{background:color-mix(in srgb, var(--sheet) 88%, transparent); backdrop-filter:blur(9px);
@@ -78,7 +126,9 @@ img{max-width:100%}
   font-size:25px; line-height:1.05; letter-spacing:-.015em; white-space:nowrap; font-feature-settings:"ss01"}
 .word .yr{font-family:"Martian Mono",monospace; font-size:9.5px; letter-spacing:.16em; font-weight:400;
   color:var(--ink3); margin-left:10px; vertical-align:3px}
-.live{display:none; align-items:center; gap:6px; font-size:9px; letter-spacing:.16em; color:var(--live)}
+.live{display:none; align-items:center; gap:6px; font-size:9px; letter-spacing:.16em; color:var(--live);
+  border:1px solid color-mix(in srgb, var(--live) 40%, transparent); border-radius:2px; padding:3px 7px}
+.live:hover{background:color-mix(in srgb, var(--live) 10%, transparent)}
 .live.on{display:inline-flex}
 .live i{width:6px; height:6px; border-radius:50%; background:currentColor; animation:blip 1.9s infinite}
 @keyframes blip{50%{opacity:.2}}
@@ -175,6 +225,7 @@ img{max-width:100%}
 .score{font-size:10.5px; text-align:right; line-height:1.55; color:var(--ink)}
 .score.now{color:var(--live)}
 .score .sub{display:block; color:var(--ink3)}
+.line .sub .b{white-space:nowrap}   /* keep "was PIT -3" from breaking across lines */
 .score .none{color:var(--faint)}
 
 .resedit{display:flex; gap:5px; align-items:center; justify-content:flex-end; flex-wrap:wrap; font-size:10px}
@@ -261,6 +312,9 @@ details.about b{color:var(--ink); font-weight:600}
   .ledger span:nth-child(3)::before{content:"VEG"; color:var(--gold)}
   .line,.score{text-align:left}
   .line .sub,.score .sub{display:inline; margin-left:9px}
+  .score.now{justify-content:flex-start}
+  .livebar{grid-template-columns:minmax(0,1fr); grid-template-areas:"state" "scores" "meta" "sync"; gap:9px}
+  .lb-meta{justify-content:space-between}
   .resedit{justify-content:flex-start}
   .scoreline{gap:16px; width:100%; margin-left:0}
   .mast-row.one{flex-wrap:wrap; gap:9px}

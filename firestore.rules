@@ -7,10 +7,14 @@ rules_version = '2';
    requiring one would have bought nothing except an extra product to configure.
 
    What these rules do enforce is that a caller can only ever touch the 18 week
-   documents of this one season, can only store the three fields the app knows
+   documents of this one season, can only store the four fields the app knows
    about, and cannot read or write anything else in the project. Picks are small
    and replaceable. The practical protection for a family sheet is that the URL
    is not advertised.
+
+   'touch' is a map of {bo|dad: serverTimestamp} written alongside every save, so
+   each phone can show when the other person last changed something. It is a
+   courtesy signal, not a credential: anyone who can write picks can write it.
 
    To lock this down properly later: enable a real sign-in provider (Google) in
    the Firebase console, then gate on the two account IDs -
@@ -24,11 +28,13 @@ service cloud.firestore {
       allow read: if true;
 
       allow write: if week.matches('^w([1-9]|1[0-8])$')
-        && request.resource.data.keys().hasOnly(['picks', 'results', 'updatedAt'])
+        && request.resource.data.keys().hasOnly(['picks', 'results', 'touch', 'updatedAt'])
         && (!('picks' in request.resource.data) || request.resource.data.picks is map)
         && (!('results' in request.resource.data) || request.resource.data.results is map)
+        && (!('touch' in request.resource.data) || request.resource.data.touch is map)
         && (!('picks' in request.resource.data) || request.resource.data.picks.size() <= 16)
-        && (!('results' in request.resource.data) || request.resource.data.results.size() <= 16);
+        && (!('results' in request.resource.data) || request.resource.data.results.size() <= 16)
+        && (!('touch' in request.resource.data) || request.resource.data.touch.keys().hasOnly(['bo', 'dad']));
     }
 
     match /{document=**} {

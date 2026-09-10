@@ -52,6 +52,8 @@ const state = {
   resMode: false,
   book: {},
   imported: LS.get("bl.imported", {}),
+  shared: false,
+  saving: "idle",
   now: Date.now()
 };
 
@@ -142,7 +144,7 @@ function setPulling(delta){
 }
 async function pullWeek(wk, force){
   const at = lastPull[wk];
-  const maxAge = weekIsLive(wk) ? 45000 : 600000;
+  const maxAge = weekIsLive(wk) ? 25000 : 600000;
   if (!force && at && Date.now() - at < maxAge) return;
   lastPull[wk] = Date.now();
   setPulling(1);
@@ -266,11 +268,132 @@ function seasonStats(){
   return t;
 }
 function pct(n, d){ return d ? (n / d * 100).toFixed(1) + "%" : "-"; }
+function ago(ms){
+  const d = Date.now() - ms;
+  if (d < 0 || d < 45000) return "just now";
+  if (d < 90000) return "a minute ago";
+  if (d < 3600000) return Math.round(d / 60000) + " min ago";
+  if (d < 7200000) return "an hour ago";
+  if (d < 86400000) return Math.round(d / 3600000) + " hr ago";
+  if (d < 172800000) return "yesterday";
+  return new Date(ms).toLocaleDateString(undefined, {month:"short", day:"numeric"});
+}
+function tsMillis(v){
+  if (!v) return 0;
+  if (typeof v.toMillis === "function") return v.toMillis();
+  if (typeof v.seconds === "number") return v.seconds * 1000;
+  const t = Date.parse(v);
+  return isNaN(t) ? 0 : t;
+}
+function clockLabel(ms){
+  const d = new Date(ms);
+  let h = d.getHours(); const ap = h >= 12 ? "pm" : "am"; h = h % 12 || 12;
+  return h + ":" + String(d.getMinutes()).padStart(2, "0") + ap;
+}
 function signed(n){ return (n >= 0 ? "+" : "") + n; }
+
+/* What is actually happening in a week right now, which is the one thing the
+   sheet could not tell you at a glance: you had to read 16 rows to find out. */
+function liveSummary(wk){
+  const gs = BY_WEEK[wk] || [];
+  const s = {games:gs.length, live:0, final:0, ahead:0, next:null, inplay:[]};
+  for (let i=0;i<gs.length;i++){
+    const g = gs[i], lv = liveOf(wk, g.key);
+    if (lv && lv.st === "in"){ s.live++; s.inplay.push(g); continue; }
+    if (resultOf(wk, g.key)){ s.final++; continue; }
+    s.ahead++;
+    const k = kickoff(wk, g.key);
+    if (k !== null && (s.next === null || k < s.next)) s.next = k;
+  }
+  return s;
+}
+/* ESPN's shortDetail reads "9:12 - 2nd Quarter". In a column this narrow that
+   wraps into nonsense, and "Quarter" carries nothing "2nd" doesn't. */
+function periodText(det){
+  return String(det || "")
+    .replace(/\s*-\s*/, " ")
+    .replace(/\s*Quarter\b/i, "")
+    .replace(/^End of /i, "End ")
+    .trim();
+}
+function liveWeek(){
+  for (let i=0;i<WEEKS.length;i++){
+    const w = WEEKS[i], d = LIVE[w];
+    if (!d || !d.games) continue;
+    const ks = Object.keys(d.games);
+    for (let j=0;j<ks.length;j++) if (d.games[ks[j]].st === "in") return w;
+  }
+  return null;
+}
 
 /* ------------------------------------------------------------------ writing */
 let store = null;
 function persist(){ LS.set("bl.book", state.book); }
+
+/* Edits this device has made but has not yet seen come back from the shared
+   sheet. mergeRemote replaces a week wholesale, so without this a pick made
+   while the connection was still opening - or while the phone was on a train -
+   would be drawn on screen, then silently erased by the next snapshot. Pending
+   edits sit on top of whatever arrives until the server echoes them back. */
+const PEND = LS.get("bl.pend", {}) || {};
+function pendSave(){ LS.set("bl.pend", PEND); }
+function pendMark(wk, key, who, val){
+  const w = PEND[wk] = PEND[wk] || {};
+  const c = w[key] = w[key] || {};
+  c[who] = val || null;
+  pendSave();
+}
+function pendCount(){
+  let n = 0;
+  Object.keys(PEND).forEach(function(wk){
+    Object.keys(PEND[wk]).forEach(function(k){ n += Object.keys(PEND[wk][k]).length; });
+  });
+  return n;
+}
+function pendReconcile(wk, remotePicks){
+  const w = PEND[wk];
+  if (!w) return;
+  Object.keys(w).forEach(function(key){
+    const cell = w[key];
+    Object.keys(cell).forEach(function(who){
+      const remote = (remotePicks[key] && remotePicks[key][who]) || null;
+      if ((cell[who] || null) === remote) delete cell[who];
+    });
+    if (!Object.keys(cell).length) delete w[key];
+  });
+  if (!Object.keys(w).length) delete PEND[wk];
+  pendSave();
+}
+function pendApply(wk, picks){
+  const w = PEND[wk];
+  if (!w) return picks;
+  Object.keys(w).forEach(function(key){
+    if (!KEYS_BY_WEEK[wk] || !KEYS_BY_WEEK[wk][key]) return;
+    const cell = Object.assign({}, picks[key]);
+    Object.keys(w[key]).forEach(function(who){
+      if (w[key][who]) cell[who] = w[key][who]; else delete cell[who];
+    });
+    if (Object.keys(cell).length) picks[key] = cell; else delete picks[key];
+  });
+  return picks;
+}
+/* No shared sheet at all - nothing can ever be sent, so stop tracking sends.
+   The picks themselves stay put; only the outbound ledger is dropped. */
+function purgePending(){
+  Object.keys(PEND).forEach(function(k){ delete PEND[k]; });
+  pendSave();
+}
+function flushPending(){
+  Object.keys(PEND).forEach(function(wk){
+    const obj = {};
+    Object.keys(PEND[wk]).forEach(function(key){
+      const cell = {};
+      Object.keys(PEND[wk][key]).forEach(function(who){ cell[who] = PEND[wk][key][who]; });
+      if (Object.keys(cell).length) obj[key] = cell;
+    });
+    if (Object.keys(obj).length && store) store.savePicks(Number(wk), obj, state.me).catch(function(){});
+  });
+}
 function applyPicks(wk, obj){
   const b = state.book[wk] = state.book[wk] || {week:wk, picks:{}, results:{}};
   b.picks = b.picks || {};
@@ -285,15 +408,20 @@ function applyPicks(wk, obj){
 }
 function setPicks(wk, obj){
   applyPicks(wk, obj);
+  Object.keys(obj).forEach(function(k){
+    const patch = obj[k];
+    if (patch === null) return;
+    Object.keys(patch).forEach(function(who){ pendMark(wk, k, who, patch[who]); });
+  });
   render();
-  if (store) store.savePicks(wk, obj).catch(function(){ flash("Couldn't reach the shared sheet - saved here for now."); });
+  if (store) store.savePicks(wk, obj, state.me).catch(function(){});
 }
 function setResult(wk, key, val){
   const b = state.book[wk] = state.book[wk] || {week:wk, picks:{}, results:{}};
   b.results = b.results || {};
   if (val === null) delete b.results[key]; else b.results[key] = val;
   persist(); render();
-  if (store) store.saveResult(wk, key, val).catch(function(){});
+  if (store) store.saveResult(wk, key, val, state.me).catch(function(){});
 }
 let flashTimer = null;
 function flash(msg){
@@ -383,7 +511,9 @@ function renderScoreline(){
     const d = LIVE[w];
     if (d && d.games) Object.keys(d.games).forEach(function(k){ if (d.games[k].st === "in") anyLive = true; });
   });
-  document.getElementById("live").classList.toggle("on", anyLive);
+  const lp = document.getElementById("live");
+  lp.classList.toggle("on", anyLive);
+  lp.disabled = !anyLive;
   if (pulling > 0){ const p = document.getElementById("pulling"); if (p) p.classList.add("on"); }
 }
 
@@ -406,6 +536,87 @@ function renderWeekHead(){
   if (byes.length) bits.push("bye: " + byes.join(", "));
   document.getElementById("weekSaid").textContent = bits.join(" · ");
 }
+/* ------------------------------------------------------------------ live strip
+   Everything the sheet knows about right now, in one line: what is on, what the
+   score is, how old the numbers are, and a way to go get fresh ones. */
+function renderLiveBar(){
+  const wk = state.week, s = liveSummary(wk);
+  const cls = ["livebar"];
+  if (s.live) cls.push("on");
+
+  let phrase;
+  if (s.live) phrase = s.live + (s.live === 1 ? " game under way" : " games under way");
+  else if (s.games && s.final === s.games) phrase = "All " + s.games + " final";
+  else if (s.final) phrase = s.final + " final, " + s.ahead + " to come";
+  else if (s.next !== null) phrase = "First kickoff " + whenAbs(s.next);
+  else phrase = s.games + " games, none played";
+
+  const chips = s.inplay.map(function(g){
+    const lv = liveOf(wk, g.key);
+    const sc = (typeof lv.as === "number") ? lv.as + "&ndash;" + lv.hs : "";
+    return '<span class="chip">' + esc(g.a) + ' <b>' + sc + '</b> ' + esc(g.h) +
+      (lv.det ? '<i>' + esc(periodText(lv.det)) + '</i>' : "") + '</span>';
+  }).join("");
+
+  const d = LIVE[wk], at = d && d.fetched ? Date.parse(d.fetched) : NaN;
+  const fresh = isNaN(at) ? "not yet pulled" : "ESPN " + ago(at);
+
+  document.getElementById("livebar").className = cls.join(" ");
+  document.getElementById("livebar").innerHTML =
+    '<div class="lb-state"><i></i><span>' + esc(phrase) + '</span></div>' +
+    (chips ? '<div class="lb-scores">' + chips + '</div>' : '') +
+    '<div class="lb-meta">' +
+      '<span class="fresh" id="freshTxt">' + esc(fresh) + '</span>' +
+      '<button type="button" class="refresh" id="refreshBtn">Refresh</button>' +
+    '</div>' +
+    '<div class="lb-sync" id="lbSync"></div>';
+  renderSync();
+}
+function whenAbs(ms){
+  const d = new Date(ms);
+  const day = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][d.getDay()];
+  return day + " " + clockLabel(ms);
+}
+/* The sync line answers the question the status dot could not: has the other
+   person actually seen any of this? */
+function renderSync(){
+  const el = document.getElementById("lbSync");
+  if (!el) return;
+  const bits = [];
+  if (!state.shared){
+    el.className = "lb-sync off";
+    el.innerHTML = '<b>Not shared.</b> Picks are saved on this device only &mdash; ' +
+      'use the codes at the bottom to swap sheets by text.';
+    return;
+  }
+  el.className = "lb-sync";
+  const pending = pendCount();
+  if (state.saving === "retrying")
+    bits.push('<b class="warn">Can&rsquo;t reach the sheet.</b> Still trying &mdash; your picks are safe here.');
+  else if (pending)
+    bits.push('<b>Saving ' + pending + '&hellip;</b>');
+  else
+    bits.push('<b class="ok">Everything saved.</b>');
+
+  /* Count what is actually on the sheet rather than trusting the clock: picks
+     made before touch existed carry no timestamp, and reporting those as "hasn't
+     picked yet" while their column is full is worse than saying nothing. */
+  const ws = weekStats(state.week);
+  ["bo","dad"].forEach(function(w){
+    const label = NAME[w] + (w === state.me ? " (you)" : "");
+    const n = (w === "bo") ? ws.boIn : ws.dadIn;
+    /* The count is for the week on screen; the stamp is the newest change
+       anywhere in the season. Saying "nothing this week yet, last change just
+       now" reads as a contradiction, so the two are worded apart. */
+    if (n) bits.push(label + " " + n + " of " + ws.games + " this week" +
+                     (TOUCH[w] ? ", last change " + ago(TOUCH[w]) : ""));
+    else if (TOUCH[w]) bits.push(label + " nothing in week " + state.week +
+                     " yet, last active " + ago(TOUCH[w]));
+    else bits.push(label + " nothing yet");
+  });
+  el.innerHTML = bits.join(' <span class="dot">&middot;</span> ');
+}
+
 function ledgerCell(g, res){
   return '<div class="ledger">' + ["bo","dad","veg"].map(function(who){
     if (who === "veg"){
@@ -427,15 +638,15 @@ function lineCell(g, res){
   const sub = [];
   if (typeof m.ou === "number") sub.push("o" + half(m.ou));
   if (m.src === "live" && g.fav){
-    if (g.fav !== m.fav) sub.push("was " + esc(g.fav));
-    else if (typeof g.sp === "number" && g.sp !== m.sp)
-      sub.push((m.sp > g.sp ? "+" : "-") + half(Math.abs(m.sp - g.sp)));
+    const moved = (g.fav !== m.fav) || (typeof g.sp === "number" && g.sp !== m.sp);
+    if (moved) sub.push("was " + esc(g.fav) + (typeof g.sp === "number" && g.sp ? " -" + half(g.sp) : " PK"));
   }
   const a = atsOf(g, res);
   if (a === "cov") sub.push('<span class="cov">covered</span>');
   else if (a === "no") sub.push("no cover");
   else if (a === "push") sub.push("push");
-  return '<div class="line">' + head + (sub.length ? '<span class="sub">' + sub.join(" ") + '</span>' : "") + '</div>';
+  const subs = sub.map(function(x){ return '<span class="b">' + x + '</span>'; }).join(" ");
+  return '<div class="line">' + head + (sub.length ? '<span class="sub">' + subs + '</span>' : "") + '</div>';
 }
 function scoreCell(g, res){
   const wk = g.wk, lv = liveOf(wk, g.key);
@@ -461,7 +672,8 @@ function scoreCell(g, res){
   }
   if (lv && lv.st === "in"){
     const sc = (typeof lv.as === "number") ? lv.as + "-" + lv.hs : "under way";
-    return '<div class="score now">' + sc + (lv.det ? '<span class="sub">' + esc(lv.det) + '</span>' : "") + '</div>';
+    return '<div class="score now"><i class="pulse"></i><b>' + sc + '</b>' +
+      (lv.det ? '<span class="sub">' + esc(periodText(lv.det)) + '</span>' : "") + '</div>';
   }
   if (isLocked(wk, g.key)) return '<div class="score"><span class="none">kicked off</span></div>';
   return '<div class="score"><span class="none">-</span></div>';
@@ -474,6 +686,7 @@ function renderGames(){
     const cls = ["game"];
     if (res) cls.push("final");
     else if (lv && lv.st === "in") cls.push("inplay");
+    if (isFresh(wk, g.key)) cls.push("justin");
 
     function side(team){
       const c = ["pk"];
@@ -685,7 +898,7 @@ function render(){
     renderScoreline();
     renderNotice();
     if (state.tab === "picks"){
-      renderWeeks(); renderWeekHead(); renderSwap();
+      renderWeeks(); renderWeekHead(); renderLiveBar(); renderSwap();
       const ae = document.activeElement, gel = document.getElementById("games");
       if (!(ae && ae.tagName === "INPUT" && gel.contains(ae))) renderGames();
     }
@@ -726,6 +939,18 @@ document.getElementById("sealBtn").addEventListener("click", function(){
 });
 document.getElementById("resBtn").addEventListener("click", function(){
   state.resMode = !state.resMode; render();
+});
+document.getElementById("livebar").addEventListener("click", function(e){
+  if (!e.target.closest("#refreshBtn")) return;
+  const f = document.getElementById("freshTxt");
+  if (f) f.textContent = "checking…";
+  pullWeek(state.week, true);
+});
+document.getElementById("live").addEventListener("click", function(){
+  const w = liveWeek();
+  if (w === null) return;
+  setTab("picks");
+  state.week = w; render(); pullWeek(w, true);
 });
 document.getElementById("weeks").addEventListener("click", function(e){
   const b = e.target.closest("button[data-w]");
@@ -805,7 +1030,22 @@ function setStatus(kind, txt){
   el.className = "status " + kind;
   el.querySelector(".txt").textContent = txt;
 }
-function mergeRemote(wk, doc){
+/* When each person last changed anything, straight off the server clock. */
+const TOUCH = {bo:0, dad:0};
+/* Rows the other phone changed in the last few seconds, so the change is
+   visible as it lands instead of just quietly being there. */
+const FRESH = {};
+let freshTimer = null;
+function isFresh(wk, key){
+  const t = FRESH[wk + "|" + key];
+  return !!t && (Date.now() - t) < 6000;
+}
+function markFresh(wk, key){
+  FRESH[wk + "|" + key] = Date.now();
+  if (!freshTimer) freshTimer = setTimeout(function(){ freshTimer = null; render(); }, 6200);
+}
+
+function mergeRemote(wk, doc, confirmed){
   const picks = {}, results = {};
   const p = (doc && doc.picks) || {}, r = (doc && doc.results) || {};
   Object.keys(p).forEach(function(k){
@@ -818,7 +1058,29 @@ function mergeRemote(wk, doc){
     if (!KEYS_BY_WEEK[wk] || !KEYS_BY_WEEK[wk][k]) return;
     if (r[k] && r[k].w) results[k] = r[k];
   });
-  state.book[wk] = {week:wk, picks:picks, results:results};
+
+  const t = (doc && doc.touch) || {};
+  ["bo","dad"].forEach(function(w){
+    const ms = tsMillis(t[w]);
+    if (ms > TOUCH[w]) TOUCH[w] = ms;
+  });
+
+  /* Anything the other person changed since the last snapshot gets a moment of
+     highlight. Only theirs - your own taps do not need announcing back to you. */
+  const before = (state.book[wk] && state.book[wk].picks) || {};
+  const them = state.me === "bo" ? "dad" : state.me === "dad" ? "bo" : null;
+  if (them){
+    const seen = {};
+    Object.keys(picks).concat(Object.keys(before)).forEach(function(k){
+      if (seen[k]) return;
+      seen[k] = 1;
+      const a = (before[k] || {})[them] || null, b = (picks[k] || {})[them] || null;
+      if (a !== b) markFresh(wk, k);
+    });
+  }
+
+  if (confirmed) pendReconcile(wk, picks);
+  state.book[wk] = {week:wk, picks:pendApply(wk, picks), results:results};
   persist();
 }
 function localPicksByWeek(){
@@ -845,9 +1107,15 @@ function start(){
   render();
   pullWeek(state.week, true);
   setInterval(function(){ state.now = Date.now(); render(); }, 30000);
-  setInterval(function(){ if (state.tab === "picks") pullWeek(state.week); }, 30000);
+  setInterval(function(){ if (state.tab === "picks") pullWeek(state.week); }, 20000);
   document.addEventListener("visibilitychange", function(){
-    if (!document.hidden) pullWeek(state.week);
+    if (document.hidden) return;
+    /* Coming back to the tab: redraw before waiting on the network. A page that
+       first loaded in the background has no frame yet, because requestAnimationFrame
+       does not run there, and the clock has moved on regardless. */
+    state.now = Date.now();
+    render();
+    pullWeek(state.week);
   });
 
   /* Snapshot what this device is carrying BEFORE any remote snapshot lands.
@@ -856,11 +1124,20 @@ function start(){
   const carried = localPicksByWeek();
   connect({
     seed: function(){ return carried; },
-    onWeek: function(wk, doc){ mergeRemote(wk, doc); render(); },
+    onWeek: function(wk, doc, confirmed){ mergeRemote(wk, doc, confirmed); render(); },
     onStatus: function(kind, txt){
+      state.shared = (kind === "live");
       setStatus(kind, txt);
-      onSwapCopyChange(kind === "live");
-    }
-  }).then(function(s){ store = s; }).catch(function(){});
+      onSwapCopyChange(state.shared);
+      render();
+    },
+    onSave: function(kind){ state.saving = kind; render(); }
+  }).then(function(s){
+    store = s;
+    /* Anything picked before the connection came up has never left this phone.
+       Send it now rather than leaving it stranded here. */
+    if (s) flushPending(); else purgePending();
+    render();
+  }).catch(function(){ purgePending(); render(); });
 }
 start();

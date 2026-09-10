@@ -19,12 +19,43 @@ The artifact came first and is kept because it still works. The Pages site exist
 **the artifact sandbox blocks every network call** — no `fetch`, no external images — which is
 also why a `db`-backed artifact can't be link-shared at all. A plain static page has neither limit.
 
+## The live strip
+
+Under the week switcher, one line carries everything the sheet knows right now: what is under way (with
+the scores of in-play games), how old the ESPN numbers are, a **Refresh** that forces a pull, and a sync
+line saying whether both sheets are in step. Before this you had to read sixteen rows to work out what was
+happening, and the freshness stamp was hidden inside the *About* disclosure.
+
+The page refetches on its own — every 20 seconds while a game in the viewed week is live, every ten minutes
+otherwise, and whenever the tab regains focus. Coming back to a backgrounded tab also forces a redraw:
+`requestAnimationFrame` does not run in a hidden tab, so a page that first loaded in the background has no
+frame to build on.
+
 ## The shared ledger
 
 Picks sync live through Firestore. Project **`boson-line`**, data at
-`seasons/2026/weeks/w1` … `w18`, each `{ picks: {AWAY@HOME: {bo, dad}}, results: {...}, updatedAt }`.
-The header pill reads *Shared sheet* when it's connected and *On this device* when it isn't; the app is
+`seasons/2026/weeks/w1` … `w18`, each
+`{ picks: {AWAY@HOME: {bo, dad}}, results: {...}, touch: {bo, dad}, updatedAt }`.
+The header pill reads *In sync* when it's connected and *On this device* when it isn't; the app is
 fully usable either way, and the season pick-code still works as a backup or for moving to a new phone.
+
+Three things make the sync trustworthy rather than merely present:
+
+- **`touch`** stamps each save with the server clock per person, so the sheet can say *"Dad 7 of 16 this
+  week, last change just now"* instead of only *"connected"*. That is the difference between believing it
+  works and hoping it does. It is a courtesy signal, not a credential — anyone who can write picks can
+  write it.
+- **Pending edits survive a snapshot.** A remote snapshot replaces a week wholesale, so a pick made while
+  the connection was still opening — or on a train — used to be drawn on screen and then silently erased.
+  Local edits are now held in `bl.pend` and reapplied on top of whatever arrives, cleared only when the
+  *server* echoes them back. Firestore replays a local write immediately, before the server has taken it,
+  so reconciling on that echo would let *"Everything saved"* lie; the app waits for a snapshot with no
+  writes still in flight.
+- **Failed writes retry** with backoff instead of being dropped, and anything still stranded on the phone
+  is flushed the moment a connection is established.
+
+A pick arriving from the other phone gets one beat of highlight on its row, so a change that lands while
+you are looking at the week is visible rather than merely present.
 
 **There is no sign-in.** Anonymous auth was the obvious thing to require, but it is not a real gate —
 anyone can mint an anonymous token in one call — and enabling it meant turning on Identity Platform, a
@@ -35,10 +66,17 @@ everywhere else in the project. Verified against the live project:
 | Request | Result |
 |---|---|
 | write a valid week (`w2`, `picks`) | accepted |
+| write `touch.bo` / `touch.dad` | accepted |
+| write `touch.pete` (a third name) | rejected |
 | write a bogus week id (`w99`) | rejected |
 | write an unknown field | rejected |
+| write `touch` as a string, not a map | rejected |
 | write another collection | rejected |
 | write another season (`2027`) | rejected |
+
+Deletes are refused too, as a side effect rather than by design: the rule reads
+`request.resource.data.keys()`, and on a delete there is no `request.resource`. Clearing a field means
+`PATCH`ing it away, not deleting the document.
 
 The practical protection for a family sheet is that the URL is not advertised. To lock it down properly:
 enable Google sign-in in the Firebase console, gate the rules on the two account IDs (there's a commented
@@ -121,8 +159,10 @@ All 32 pass.
   record can't drift. The "Line" column is the current market and is what against-the-spread is judged on.
 - Final scores arrive with the odds; hand entry is only an override, and is marked "by hand" in the app.
 - Games lock at kickoff. Where a kickoff time is missing, they lock when the week ends.
-- The Pages build refetches the viewed week every 30s while a game in it is live, every 10 minutes
+- The Pages build refetches the viewed week every 20s while a game in it is live, every 10 minutes
   otherwise, and whenever the tab regains focus.
+- The Line column's second line names the number the market moved *from* (`was PIT -3`) rather than a bare
+  delta (`+½`), which nobody could read at a glance.
 
 ## Phone layout
 

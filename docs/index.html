@@ -22,7 +22,7 @@
 <header class="mast" id="mast">
   <div class="mast-row one">
     <span class="word">The Boson Line<span class="yr">2026</span></span>
-    <span class="live" id="live"><i></i>LIVE</span>
+    <button type="button" class="live" id="live" title="Jump to the week that is on right now"><i></i>LIVE</button>
     <div class="scoreline" id="scoreline"></div>
   </div>
   <div class="mast-row two">
@@ -59,6 +59,7 @@
       </div>
     </div>
     <div class="weeks" id="weeks" role="group" aria-label="Choose week"></div>
+    <div class="livebar" id="livebar" aria-live="polite"></div>
     <div class="sheet-head">
       <span class="colhead">Kickoff</span>
       <span class="colhead">Matchup</span>
@@ -88,6 +89,14 @@
         locked before kickoff so its record can&rsquo;t drift.</p>
         <p><b>The line.</b> The Line column is the current DraftKings number by way of ESPN, with the move
         off the preseason number underneath. Against-the-spread is judged on that current line.</p>
+        <p><b>Staying current.</b> The strip under the week shows what is on right now, how old the
+        numbers are, and whether both sheets are in step. It refetches on its own &mdash; every 20 seconds
+        while a game in the week you are looking at is live, every ten minutes otherwise, and whenever you
+        come back to the tab. <b>Refresh</b> forces it.</p>
+        <p><b>Sharing.</b> Both of you write to the same sheet, so a pick shows up on the other phone within
+        a second or two and the other person&rsquo;s newest change is highlighted as it lands. Picks made
+        with no signal are held on the phone and sent the moment it reconnects &mdash; the line reads
+        &ldquo;Everything saved&rdquo; only when the shared sheet really has them.</p>
         <p><b>Results.</b> Lines and final scores are pulled live from ESPN whenever you open a week, so
         nothing here needs republishing. Hand entry is only for fixing something ESPN gets wrong. Games lock
         at kickoff, and while the sheet is sealed you can&rsquo;t see the other column on a game until
