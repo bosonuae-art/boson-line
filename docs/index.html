@@ -55,7 +55,12 @@
   <section id="pane-picks" role="tabpanel" aria-labelledby="tab-picks">
     <div id="notice"></div>
     <div class="whead">
-      <h2 id="weekTitle">Week 1</h2>
+      <div class="wnav">
+        <button type="button" class="warrow" id="weekPrev" aria-label="Previous week">&lsaquo;</button>
+        <h2 id="weekTitle">Week 1</h2>
+        <button type="button" class="warrow" id="weekNext" aria-label="Next week">&rsaquo;</button>
+        <button type="button" class="wall" id="weekAll" aria-expanded="false" aria-controls="weeks">All</button>
+      </div>
       <span class="said" id="weekSaid"></span>
       <div class="acts">
         <button type="button" id="fillFav">Take every favorite</button>

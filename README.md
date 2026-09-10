@@ -209,6 +209,45 @@ All 32 pass.
 
 ## Phone layout
 
+The first version of this was desktop-shaped and squeezed: the sheet's five columns
+reflowed into stacked label/value fragments, section tabs sat in the top-right
+corner, and eighteen 40px week buttons lived in a strip that opened scrolled to
+week one. It measured fine and felt like an afterthought, because it was one.
+
+Rebuilt phone-first against three findings:
+
+- **The bottom third is where the thumb rests**; the top corners are the hardest
+  reach on a large handset, and bottom tab bars suit 3–5 sections with targets of
+  at least 44px. Section switching moved from the top-right corner to a fixed
+  bottom bar — the same three buttons and the same wiring, just placed where the
+  hand already is. Pick buttons went to 52px.
+- **Cards are for records read one at a time; tables are for comparison**, and
+  reflowing a table into labelled fragments makes "all table interactions
+  nonsense". So the two halves of this app diverge. A game is one decision, so it
+  became a decision row: a quiet line of context, two targets, a quiet line of
+  consequence. The standings are pure comparison — Bo against Dad against Vegas
+  across a row — so they *stay a table*, made usable rather than reflowed.
+- **Lock the leftmost column and stick the header** when a comparison table has to
+  scroll sideways, rather than hiding columns or forcing landscape. The ledger's
+  week column is pinned and its head sticks, so a row never loses its name and a
+  column never loses its meaning.
+
+Also: your own pick is hidden from the ledger on a phone, because the button you
+pressed is already lit and repeating it cost a third of the row; the week control
+became `‹ Week 10 ›` plus an **All** grid of eighteen 44px targets; and the number
+that actually drives the visit — how many games still want a pick — leads the
+summary line.
+
+The first game now sits 325px down a 390px-wide screen with four games visible,
+against roughly 537px and one before. The masthead is sticky, so that header is a
+one-time cost rather than a permanent tax.
+
+Sources: [NN/g on mobile tables](https://www.nngroup.com/articles/mobile-tables/),
+[table vs list vs cards](https://uxpatterns.dev/pattern-guide/table-vs-list-vs-cards),
+[thumb-zone guidance](https://parachutedesign.ca/blog/thumb-zone-ux/).
+
+## Earlier phone fixes
+
 Checked at 390x844 and 360x780 by framing the site in same-origin iframes at those widths (media queries
 evaluate against the frame's viewport) and measuring `scrollWidth` against `clientWidth`, rather than
 eyeballing screenshots. Both widths now report zero horizontal overflow on all three tabs. Two real bugs

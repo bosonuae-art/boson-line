@@ -629,7 +629,14 @@ function renderWeekHead(){
   if (state.me) bits.push((state.me === "bo" ? s.boIn : s.dadIn) + " of " + s.games + " picked");
   if (s.decided) bits.push("Bo " + s.bo + ", Dad " + s.dad + ", Vegas " + s.veg);
   if (byes.length) bits.push("bye: " + byes.join(", "));
-  document.getElementById("weekSaid").textContent = bits.join(" · ");
+  /* The number that drives the visit - how many games still want a pick - leads
+     the line, because on a phone it is the only part of it anyone reads. */
+  const left = state.me ? s.games - (state.me === "bo" ? s.boIn : s.dadIn) : 0;
+  const lead = left > 0 ? '<b class="todo">' + left + ' to pick</b>' : "";
+  document.getElementById("weekSaid").innerHTML = lead + esc(bits.join(" · "));
+  const i = WEEKS.indexOf(wk);
+  document.getElementById("weekPrev").disabled = (i <= 0);
+  document.getElementById("weekNext").disabled = (i >= WEEKS.length - 1);
 }
 /* ------------------------------------------------------------------ live strip
    Everything the sheet knows about right now, in one line: what is on, what the
@@ -654,14 +661,14 @@ function renderLiveBar(){
   }).join("");
 
   const d = LIVE[wk], at = d && d.fetched ? Date.parse(d.fetched) : NaN;
-  const fresh = isNaN(at) ? "not yet pulled" : "ESPN " + ago(at);
+  const fresh = isNaN(at) ? "not yet pulled" : '<span class="src">ESPN</span> ' + esc(ago(at));
 
   document.getElementById("livebar").className = cls.join(" ");
   document.getElementById("livebar").innerHTML =
     '<div class="lb-state"><i></i><span>' + esc(phrase) + '</span></div>' +
     (chips ? '<div class="lb-scores">' + chips + '</div>' : '') +
     '<div class="lb-meta">' +
-      '<span class="fresh" id="freshTxt">' + esc(fresh) + '</span>' +
+      '<span class="fresh" id="freshTxt">' + fresh + '</span>' +
       '<button type="button" class="refresh" id="refreshBtn">Refresh</button>' +
     '</div>' +
     '<div class="lb-sync" id="lbSync"></div>';
@@ -715,16 +722,29 @@ function renderSync(){
   el.innerHTML = bits.join(' <span class="dot">&middot;</span> ');
 }
 
+/* Each cell carries its own label rather than leaning on nth-child pseudo-elements,
+   which is what let the phone layout reflow a table into labelled fragments - the
+   pattern that reads as a broken table rather than as anything designed. The label
+   shows on a phone, where there are no column heads, and hides on the desktop,
+   where there are. Your own column hides on a phone too: the button you tapped is
+   already lit, so repeating it costs a third of the row for nothing. */
 function ledgerCell(g, res){
   return '<div class="ledger">' + ["bo","dad","veg"].map(function(who){
+    const cls = ["who", who];
+    if (who === state.me) cls.push("self");
+    const label = (who === "veg") ? "Vegas" : NAME[who];
+    let body;
     if (who === "veg"){
-      if (!g.fav) return '<span class="none">-</span>';
-      return '<span class="' + (res ? (g.fav === res.w ? "hit" : "miss") : "") + '">' + esc(g.fav) + '</span>';
+      body = !g.fav ? '<span class="none">-</span>'
+        : '<b class="' + (res ? (g.fav === res.w ? "hit" : "miss") : "") + '">' + esc(g.fav) + '</b>';
+    } else if (isSealed(g, who)){
+      body = '<span class="seal" title="Sealed until you pick">·</span>';
+    } else {
+      const p = pickOf(g.wk, g.key, who);
+      body = !p ? '<span class="none">-</span>'
+        : '<b class="' + (res ? (p === res.w ? "hit" : "miss") : "") + '">' + esc(p) + '</b>';
     }
-    if (isSealed(g, who)) return '<span class="seal" title="Sealed until you pick">·</span>';
-    const p = pickOf(g.wk, g.key, who);
-    if (!p) return '<span class="none">-</span>';
-    return '<span class="' + (res ? (p === res.w ? "hit" : "miss") : "") + '">' + esc(p) + '</span>';
+    return '<span class="' + cls.join(" ") + '"><i>' + esc(label) + '</i>' + body + '</span>';
   }).join("") + '</div>';
 }
 function lineCell(g, res){
@@ -814,8 +834,8 @@ function renderDemoBar(){
   if (!demo.on) return;
   el.innerHTML =
     '<span class="tag">Sample</span>' +
-    '<span class="txt"><b>This is a made-up season.</b> Week ' + DEMO_WEEK + ' of a year that has not ' +
-    'happened, so the sheet can be shown full. Nothing here is saved or sent to the shared sheet.</span>' +
+    '<span class="txt"><b>Made-up season.</b> Week ' + DEMO_WEEK + ' of a year that has not happened, ' +
+    'so the sheet can be shown full. Nothing here is saved or shared.</span>' +
     '<button type="button" id="demoOff">Back to the real sheet</button>';
 }
 function renderNotice(){
@@ -1071,9 +1091,31 @@ document.getElementById("live").addEventListener("click", function(){
   setTab("picks");
   state.week = w; render(); pullWeek(w, true);
 });
+function goWeek(w){
+  if (WEEKS.indexOf(w) < 0) return;
+  state.week = w;
+  closeWeekGrid();
+  render();
+  pullWeek(w);
+}
+function closeWeekGrid(){
+  document.getElementById("weeks").classList.remove("open");
+  document.getElementById("weekAll").setAttribute("aria-expanded", "false");
+}
 document.getElementById("weeks").addEventListener("click", function(e){
   const b = e.target.closest("button[data-w]");
-  if (b){ state.week = Number(b.dataset.w); render(); pullWeek(state.week); }
+  if (b) goWeek(Number(b.dataset.w));
+});
+document.getElementById("weekPrev").addEventListener("click", function(){
+  goWeek(WEEKS[Math.max(0, WEEKS.indexOf(state.week) - 1)]);
+});
+document.getElementById("weekNext").addEventListener("click", function(){
+  goWeek(WEEKS[Math.min(WEEKS.length - 1, WEEKS.indexOf(state.week) + 1)]);
+});
+document.getElementById("weekAll").addEventListener("click", function(){
+  const el = document.getElementById("weeks");
+  const open = el.classList.toggle("open");
+  this.setAttribute("aria-expanded", String(open));
 });
 document.getElementById("demoBtn").addEventListener("click", function(){ setDemo(!demo.on); });
 document.getElementById("demobar").addEventListener("click", function(e){
