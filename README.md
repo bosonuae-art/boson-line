@@ -46,6 +46,42 @@ example in `firestore.rules`), and have `store.js` sign in before it reads. The 
 is a Firebase web key and is meant to ship in client code; it can be narrowed further with an HTTP-referrer
 restriction in the Cloud console under APIs & Services → Credentials.
 
+## Managing Firebase from here
+
+The project was set up by hand through the console, which was tedious and left `firestore.rules` in this
+repo and the rules that are actually live free to drift apart. `firebase-tools` closes that gap:
+
+```bash
+firebase login                              # one-time, opens a browser
+firebase deploy --only firestore:rules      # publish firestore.rules to the live project
+```
+
+`.firebaserc` pins the default project to `boson-line` and `firebase.json` points at `firestore.rules`, so
+that deploy is all it takes. **`firestore.rules` here is the source of truth** — change it in the repo and
+deploy, never edit rules in the console.
+
+`.mcp.json` registers Firebase's official MCP server for this project, so Claude Code can drive the same
+operations as typed tools. It authenticates with whatever `firebase login` established, so there are no
+keys in the config. Verified working against the installed CLI (firebase-tools 15.30.0, MCP server 0.3.0,
+68 tools):
+
+| Step | Tool |
+|---|---|
+| Create a project | `firebase_create_project` |
+| Create the Firestore database | `firestore_create_database` |
+| Register a web app | `firebase_create_app` |
+| Fetch the web SDK config | `firebase_get_sdk_config` |
+| Read / validate / deploy rules | `firebase_get_security_rules`, `firebase_validate_security_rules`, `firebase_deploy` |
+| Read and write picks | `firestore_get_document`, `firestore_query_collection`, `firestore_update_document` |
+
+**What it cannot do: enable an authentication sign-in provider.** The whole `auth_` group is
+`auth_get_users`, `auth_update_user`, `auth_set_sms_region_policy` — nothing that turns on anonymous or
+Google sign-in. That is console-only, it is the exact step that blocked the original setup, and it is why
+this app ended up with no sign-in at all. Accepting the Firebase terms of service is likewise console-only.
+
+Everything else about that first setup — the project, the database, the app registration, the rules — would
+have been scriptable.
+
 ## What's here
 
 | File | What it is |
