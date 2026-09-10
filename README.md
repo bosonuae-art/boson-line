@@ -37,11 +37,47 @@ there were exactly two colours named `--bo` and `--dad`, hardwired into a dozen
 selectors.
 
 Open the panel from the name button in the masthead. Tap a row to pick as that
-person, type in the field to rename, `×` to remove — removing only takes them off
-the list, their picks stay in the week documents, so putting them back restores
-everything. **There is no permission model**: same as the rest of this, anyone with
-the link can rename anyone or add a player. For a family sheet that is the right
-trade; if it ever isn't, the fix is the sign-in note below.
+person, type in the field to rename, `×` to remove. **There is no permission
+model**: same as the rest of this, anyone with the link can rename anyone or add a
+player. For a family sheet that is the right trade; if it ever isn't, the fix is
+the sign-in note below.
+
+### Roster edits are ops, not lists
+
+Writing the whole list back is what a two-player sheet gets away with. With three
+it means the slower phone deletes whoever the other one just added — and a phone
+still holding last week's list, one that has not had its first snapshot yet or has
+been in a tunnel, deletes them for everybody. On a sheet where a missing player is
+a missing column of picks, that reads as lost data even though the picks are all
+still there.
+
+So an edit is not a list. `docs/assets/roster.js` defines five ops — `rename`,
+`add`, `remove`, `restore`, `seed` — as a pure reducer over `{players, retired}`.
+`store.js` applies each one inside a Firestore transaction against whatever the
+document holds at the moment it lands, so two phones editing at once merge
+instead of one erasing the other. A transaction needs the network, unlike the
+picks queue that Firestore holds offline, so an op that cannot go now waits on a
+retry queue; every op is idempotent, which is what lets a queued one be replayed
+without first working out whether it already went through. After six failed
+attempts it is given up on and said so, rather than spinning against a rule that
+will never accept it. Ops this phone has not managed to send are replayed on top
+of each incoming snapshot, so an unsent rename stays on screen rather than
+flickering back for as long as the write takes.
+
+### Nothing is deleted
+
+Removing somebody moves them to `retired` and leaves their picks exactly where
+they are, so **any** phone can put them back and the whole column returns — not
+just the phone that removed them, and not just for fifteen seconds. The panel
+lists them under *Removed* with a *Bring back* button. `×` also takes two taps
+now: the first turns it into *Remove?*, which disarms itself after five seconds.
+One tap on a 44px target beside a name field was too easy to hit by accident, and
+this is the one control whose effect everybody else sees.
+
+Pasting a pick code is the other way a season can be written over. It can only
+ever overwrite a pick, never blank one, but the sheet now reads what was there
+first, says how many picks actually moved rather than how big the code was, and
+offers them back.
 
 Two knock-on changes worth knowing:
 

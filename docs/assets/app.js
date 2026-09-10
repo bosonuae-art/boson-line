@@ -5,6 +5,7 @@
 import { SCHED, BYES, ACCENTS, SLUG, SEED, SEED_AT } from "./data.js";
 import { connect } from "./store.js";
 import { buildDemo, DEMO_WEEK } from "./demo.js";
+import { MAX_PLAYERS, cleanDoc, applyOp, applyOps } from "./roster.js";
 
 /* ------------------------------------------------------------------ static */
 const TEAMS = {
@@ -50,14 +51,18 @@ const LS = {
    roster is shared through Firestore, because a player Dad adds has to exist on
    Bo's phone too - a local-only roster would give each of them columns the other
    could not see. Eight is the cap, which is where the colour slots run out. */
-const MAX_PLAYERS = 8;
 const DEFAULT_ROSTER = [{id:"bo", name:"Bo"}, {id:"dad", name:"Martin"}];
 let ROSTER = DEFAULT_ROSTER.map(function(p){ return {id:p.id, name:p.name}; });
+/* Removed players. They are not deleted anywhere - not here, not on the shared
+   sheet, and above all not in the picks - so bringing one back restores their
+   whole column. See roster.js for why removal works this way. */
+let RETIRED = [];
 
 function ids(){ return ROSTER.map(function(p){ return p.id; }); }
 function nameOf(who){
   if (who === "veg") return "Vegas";
   for (let i = 0; i < ROSTER.length; i++) if (ROSTER[i].id === who) return ROSTER[i].name;
+  for (let i = 0; i < RETIRED.length; i++) if (RETIRED[i].id === who) return RETIRED[i].name;
   return who;
 }
 /* Colour is positional, so it stays put as long as the order does. */
@@ -68,27 +73,9 @@ function slotOf(who){
 }
 function newPlayerId(){
   let id;
-  do { id = "p" + Math.random().toString(36).slice(2, 7); } while (ids().indexOf(id) >= 0);
+  do { id = "p" + Math.random().toString(36).slice(2, 7); }
+  while (ids().indexOf(id) >= 0 || RETIRED.some(function(p){ return p.id === id; }));
   return id;
-}
-/* Anything arriving from the shared sheet is another device's idea of the roster,
-   so it is bounded and scrubbed before it is trusted to render. */
-/* Applied at every boundary, not just the remote one. A roster can also arrive
-   from this device's own storage - written by an older build, a half-finished
-   edit, or hand-editing - and "it came from localStorage" is not the same as
-   "it is well formed". A 500-character name stretched the scoreline to 3851px
-   and a duplicated id drew the same player twice, both from that path. */
-function cleanRoster(list){
-  if (!Array.isArray(list)) return null;
-  const out = [], seen = {};
-  list.forEach(function(p){
-    if (!p || typeof p.id !== "string") return;
-    const id = p.id.slice(0, 24).replace(/[^A-Za-z0-9_-]/g, "");
-    if (!id || seen[id] || out.length >= MAX_PLAYERS) return;
-    seen[id] = 1;
-    out.push({id: id, name: String(p.name == null ? id : p.name).slice(0, 24) || id});
-  });
-  return out.length ? out : null;
 }
 
 const state = {
@@ -651,20 +638,41 @@ function decodePicks(code){
   });
   return {who:who, byWeek:byWeek, count:n};
 }
+/* A code carries a whole season, so pasting the wrong one - or an old one -
+   writes over however many picks have been changed since it was made. It can
+   never blank a pick, only overwrite one, but that is still a loss. So what was
+   there is read first and offered back, and the count says how much of the sheet
+   actually moved rather than just how big the code was. */
 function applyCode(code){
   const d = decodePicks(code);
   if (!d){ flash("That code didn't read right. Copy the whole thing and try again."); return; }
+  const prev = {};
+  let over = 0;
   Object.keys(d.byWeek).forEach(function(wk){
     const w = Number(wk), obj = {};
     Object.keys(d.byWeek[wk]).forEach(function(k){
+      const was = pickOf(w, k, d.who) || null;
+      if (was !== d.byWeek[wk][k]){ (prev[w] = prev[w] || {})[k] = was; over++; }
       const p = {}; p[d.who] = d.byWeek[wk][k]; obj[k] = p;
     });
-    applyPicks(w, obj);
-    if (store) store.savePicks(w, obj).catch(function(){});
+    setPicks(w, obj);
   });
   state.imported[d.who] = new Date().toISOString();
   LS.set("bl.imported", state.imported);
-  flash(nameOf(d.who) + "'s sheet loaded - " + d.count + " picks across the season.");
+  const who = nameOf(d.who);
+  if (!over){
+    flash(who + "'s sheet loaded - " + d.count + " picks, all of them already here.");
+  } else {
+    flash(who + "'s sheet loaded - " + d.count + " picks, " + over +
+      " of them different to what this sheet had.", "Undo", function(){
+      Object.keys(prev).forEach(function(wk){
+        const w = Number(wk), back = {};
+        Object.keys(prev[wk]).forEach(function(k){ const p = {}; p[d.who] = prev[wk][k]; back[k] = p; });
+        setPicks(w, back);
+      });
+      flash("Put back the " + over + " pick" + (over === 1 ? "" : "s") + " that were overwritten.");
+    });
+  }
   render();
 }
 
@@ -1236,14 +1244,22 @@ function setTab(name){
 function setMe(who){ state.me = (state.me === who) ? null : who; LS.set("bl.me", state.me); render(); }
 
 /* ------------------------------------------------------------------ roster ui */
-function saveRoster(next, why){
-  ROSTER = cleanRoster(next) || ROSTER;
+/* Every roster change goes through here as an op: applied to this phone at once
+   so the panel never lags a tap, and sent as the same op to be replayed against
+   whatever the shared sheet holds when it arrives. Nothing sends a whole list. */
+function rosterEdit(op){
+  const next = applyOp({players: ROSTER, retired: RETIRED}, op);
+  ROSTER = next.players;
+  RETIRED = next.retired;
+  rosterStash();
+  if (store && store.rosterOp) store.rosterOp(op);
+  render();
+}
+function rosterStash(){
   LS.set("bl.roster", ROSTER);
+  LS.set("bl.retired", RETIRED);
   /* If the person you were is no longer on the list, you are nobody again. */
   if (state.me && ids().indexOf(state.me) < 0){ state.me = null; LS.set("bl.me", null); }
-  if (store && !demo.on && store.saveRoster) store.saveRoster(ROSTER).catch(function(){});
-  render();
-  if (why) flash(why);
 }
 function openRoster(open){
   const el = document.getElementById("roster");
@@ -1251,13 +1267,27 @@ function openRoster(open){
   document.getElementById("whoBtn").setAttribute("aria-expanded", String(!!open));
   if (open) renderRoster();
 }
+/* Removing somebody takes two taps on the same button: the first arms it and
+   says so, the second does it. A single tap on a 44px target next to a name
+   field is too easy to hit by accident, and this is the one control on the page
+   whose effect everybody else sees. */
+let armedDel = null;
+let armTimer = null;
+function armDel(id){
+  armedDel = id;
+  clearTimeout(armTimer);
+  if (id) armTimer = setTimeout(function(){ armedDel = null; renderRoster(); }, 5000);
+  renderRoster();
+}
 function renderRoster(){
   const list = document.getElementById("rlist");
   /* Never redraw while someone is mid-word in a name field. */
   const ae = document.activeElement;
   if (ae && ae.tagName === "INPUT" && list.contains(ae)) return;
+  const only = ROSTER.length <= 1;
   list.innerHTML = ROSTER.map(function(p, i){
     const me = (p.id === state.me);
+    const armed = (armedDel === p.id);
     return '<li class="' + slotOf(p.id) + (me ? " me" : "") + '">' +
       '<button type="button" class="pickme" data-id="' + esc(p.id) + '" aria-pressed="' + me + '">' +
         '<span class="dot" aria-hidden="true"></span>' +
@@ -1265,11 +1295,24 @@ function renderRoster(){
       '</button>' +
       '<input type="text" class="rname" data-id="' + esc(p.id) + '" value="' + esc(p.name) + '"' +
         ' maxlength="24" aria-label="Name for player ' + (i + 1) + '" spellcheck="false">' +
-      '<button type="button" class="rdel" data-id="' + esc(p.id) + '" aria-label="Remove ' +
-        esc(p.name) + '"' + (ROSTER.length <= 1 ? " disabled" : "") + '>&times;</button>' +
+      '<button type="button" class="rdel' + (armed ? " armed" : "") + '" data-id="' + esc(p.id) + '"' +
+        ' aria-label="' + (armed ? "Confirm removing " : "Remove ") + esc(p.name) + '"' +
+        (only ? " disabled" : "") + '>' + (armed ? "Remove?" : "&times;") + '</button>' +
     '</li>';
   }).join("");
   document.getElementById("addPlayer").disabled = ROSTER.length >= MAX_PLAYERS;
+
+  const gone = document.getElementById("rgone");
+  gone.hidden = !RETIRED.length;
+  gone.innerHTML = !RETIRED.length ? "" :
+    '<h3>Removed</h3>' +
+    '<p>Removing somebody only takes their column off the sheet. Their picks are ' +
+    'untouched, so bringing them back returns the lot &mdash; on every phone.</p>' +
+    '<ul>' + RETIRED.map(function(p){
+      return '<li><span class="rn">' + esc(p.name) + '</span>' +
+        '<button type="button" class="btn rback" data-id="' + esc(p.id) + '"' +
+        (ROSTER.length >= MAX_PLAYERS ? " disabled" : "") + '>Bring back</button></li>';
+    }).join("") + '</ul>';
 }
 document.getElementById("whoBtn").addEventListener("click", function(){
   openRoster(document.getElementById("roster").hidden);
@@ -1277,35 +1320,43 @@ document.getElementById("whoBtn").addEventListener("click", function(){
 document.getElementById("rosterDone").addEventListener("click", function(){ openRoster(false); });
 document.getElementById("rlist").addEventListener("click", function(e){
   const pick = e.target.closest("button.pickme");
-  if (pick){ setMe(pick.dataset.id); renderRoster(); return; }
+  if (pick){ armDel(null); setMe(pick.dataset.id); return; }
   const del = e.target.closest("button.rdel");
   if (!del) return;
   const id = del.dataset.id, gone = ROSTER.filter(function(p){ return p.id === id; })[0];
   if (!gone || ROSTER.length <= 1) return;
-  const before = ROSTER.slice();
-  saveRoster(ROSTER.filter(function(p){ return p.id !== id; }));
-  renderRoster();
-  /* Their picks are left where they are, so putting them back restores the lot. */
-  flash("Removed " + gone.name + ". Their picks are kept.", "Undo", function(){
-    saveRoster(before, "Put " + gone.name + " back.");
-    renderRoster();
+  if (armedDel !== id){ armDel(id); return; }        /* the first tap only arms it */
+  armDel(null);
+  rosterEdit({t: "remove", id: id});
+  /* Their picks stay on the sheet, and "Removed" below the list puts them back
+     from any phone - so this Undo is a convenience, not the safety net. */
+  flash("Removed " + gone.name + ". Their picks are kept, and they can be brought back below.",
+    "Undo", function(){
+    rosterEdit({t: "restore", id: id});
+    flash("Put " + gone.name + " back.");
   });
+});
+document.getElementById("rgone").addEventListener("click", function(e){
+  const back = e.target.closest("button.rback");
+  if (!back) return;
+  const id = back.dataset.id, who = nameOf(id);
+  if (ROSTER.length >= MAX_PLAYERS){ flash("Eight players is the limit - remove somebody first."); return; }
+  rosterEdit({t: "restore", id: id});
+  flash(who + " is back, with every pick they had.");
 });
 document.getElementById("rlist").addEventListener("change", function(e){
   const inp = e.target.closest("input.rname");
   if (!inp) return;
   const id = inp.dataset.id, name = inp.value.trim().slice(0, 24);
-  const next = ROSTER.map(function(p){
-    return p.id === id ? {id: p.id, name: name || p.name} : p;
-  });
-  if (!name) inp.value = nameOf(id);
-  saveRoster(next);
+  if (!name){ inp.value = nameOf(id); return; }     /* a blank name is not an edit */
+  if (name === nameOf(id)) return;
+  rosterEdit({t: "rename", id: id, name: name});
 });
 document.getElementById("addPlayer").addEventListener("click", function(){
   if (ROSTER.length >= MAX_PLAYERS){ flash("Eight players is the limit."); return; }
+  armDel(null);
   const id = newPlayerId();
-  saveRoster(ROSTER.concat([{id: id, name: "Player " + (ROSTER.length + 1)}]));
-  renderRoster();
+  rosterEdit({t: "add", id: id, name: "Player " + (ROSTER.length + 1)});
   const inp = document.querySelector('#rlist input.rname[data-id="' + id + '"]');
   if (inp){ inp.focus(); inp.select(); }
 });
@@ -1515,8 +1566,9 @@ function onSwapCopyChange(connected){
 /* ------------------------------------------------------------------ boot */
 function start(){
   /* Trust nothing on the way in, including what this device stored last time. */
-  const saved = cleanRoster(LS.get("bl.roster", null));
-  if (saved) ROSTER = saved;
+  const saved = cleanDoc({players: LS.get("bl.roster", null), retired: LS.get("bl.retired", null)});
+  if (saved.players.length) ROSTER = saved.players;
+  RETIRED = saved.retired;
   if (state.me && ids().indexOf(state.me) < 0){ state.me = null; LS.set("bl.me", null); }
   state.book = LS.get("bl.book", {}) || {};
   state.week = defaultWeek();
@@ -1567,19 +1619,20 @@ function start(){
       render();
     },
     onSave: function(kind){ state.saving = kind; render(); },
-    onRoster: function(list){
-      if (demo.on) return;
-      const clean = cleanRoster(list);
-      if (clean){
-        ROSTER = clean;
-        LS.set("bl.roster", ROSTER);
-        if (state.me && ids().indexOf(state.me) < 0){ state.me = null; LS.set("bl.me", null); }
-      } else if (store && store.saveRoster){
-        /* Nothing stored yet: publish what this device is carrying so the next
-           phone to open the link starts from the same list rather than a default. */
-        store.saveRoster(ROSTER).catch(function(){});
-      }
+    rosterSeed: function(){ return ROSTER; },
+    onRoster: function(doc, unsent){
+      /* The sheet is the truth. An edit this phone has made but not yet managed
+         to send is not stale though - it simply has not landed - so it is
+         replayed on top, which is what stops a rename flickering back to the old
+         name for as long as the write takes. */
+      const merged = applyOps(doc, unsent);
+      ROSTER = merged.players;
+      RETIRED = merged.retired;
+      rosterStash();
       render();
+    },
+    onRosterFail: function(){
+      flash("That change to the player list could not reach the shared sheet. It is still on this phone; the other phones have not seen it.");
     }
   }).then(function(s){
     store = s;

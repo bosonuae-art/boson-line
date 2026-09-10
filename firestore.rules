@@ -39,13 +39,23 @@ service cloud.firestore {
 
     /* The shared roster: who is playing and what each of them is called. Same
        trust model as the picks - anyone with the link can change it - but it is
-       bounded to eight entries of two short fields so it cannot become storage. */
+       bounded to eight entries of two short fields so it cannot become storage.
+
+       'retired' holds people who have been removed. Nothing here is deleted:
+       taking somebody off the sheet moves them to that list and leaves their
+       picks alone, so any phone can put them back. It is capped at twelve, and
+       the client only ever writes this document from inside a transaction that
+       applies one edit to whatever it reads - so two phones editing the roster
+       at the same moment merge rather than one erasing the other. */
     match /seasons/2026/meta/roster {
       allow read: if true;
-      allow write: if request.resource.data.keys().hasOnly(['players', 'updatedAt'])
+      allow write: if request.resource.data.keys().hasOnly(['players', 'retired', 'updatedAt'])
         && request.resource.data.players is list
         && request.resource.data.players.size() >= 1
-        && request.resource.data.players.size() <= 8;
+        && request.resource.data.players.size() <= 8
+        && (!('retired' in request.resource.data) ||
+             (request.resource.data.retired is list
+              && request.resource.data.retired.size() <= 12));
     }
 
     match /{document=**} {

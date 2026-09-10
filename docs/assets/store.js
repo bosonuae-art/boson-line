@@ -10,6 +10,7 @@
    phone say "Dad picked four minutes ago" instead of just "connected", which is
    the difference between believing the sync works and hoping it does. */
 import { firebaseConfig } from "../config.js";
+import { cleanDoc, applyOp } from "./roster.js";
 
 const SDK = "https://www.gstatic.com/firebasejs/11.10.0/";
 const SEASON = "2026";
@@ -22,7 +23,8 @@ function weekOf(id){
 export async function connect(opts){
   const onWeek = opts.onWeek, onStatus = opts.onStatus, onSave = opts.onSave || function(){};
   const onRoster = opts.onRoster || function(){};
-  const seed = opts.seed;
+  const onRosterFail = opts.onRosterFail || function(){};
+  const seed = opts.seed, rosterSeed = opts.rosterSeed;
 
   if (!firebaseConfig || !firebaseConfig.projectId){
     onStatus("local", "On this device");
@@ -149,17 +151,84 @@ export async function connect(opts){
     onStatus("error", "Shared sheet unreachable");
   });
 
-  async function saveRoster(players){
-    return fs.setDoc(rosterRef, {
-      players: players.map(function(p){ return {id: p.id, name: p.name}; }),
-      updatedAt: fs.serverTimestamp()
-    }, {merge: false});
+  /* Roster edits are ops, not lists.
+
+     Writing the whole list back is what a two-player sheet gets away with. With
+     more than two it means the slower phone deletes whoever the other one just
+     added, and a phone that is still holding last week's list - one that has not
+     had its first snapshot yet, or has been in a tunnel - deletes them for
+     everybody. So each edit is applied inside a transaction to whatever the
+     sheet holds at the moment it lands, and edits merge instead of racing.
+
+     A transaction needs the network, unlike the picks queue, which Firestore
+     will hold offline. An op that cannot go now therefore waits here and is
+     replayed later; every op is idempotent, so replaying one that already landed
+     changes nothing. After six failed attempts it is given up on and said so,
+     rather than spinning forever against a rule that will never accept it. */
+  const rq = [];
+  let rDraining = false, rBackoff = 2000;
+
+  function rosterOp(op){
+    rq.push({op: op, tries: 0});
+    drainRoster();
+    return Promise.resolve();
   }
+  /* What this phone has changed but not yet managed to send. The app replays
+     these over an incoming snapshot so an unsent rename stays on screen instead
+     of flickering back to the old name until the write lands. */
+  function rosterPending(){
+    return rq.map(function(j){ return j.op; });
+  }
+
+  async function drainRoster(){
+    if (rDraining) return;
+    rDraining = true;
+    while (rq.length){
+      const job = rq[0];
+      try {
+        await fs.runTransaction(db, async function(tx){
+          const snap = await tx.get(rosterRef);
+          const next = applyOp(cleanDoc(snap.exists() ? snap.data() : null), job.op);
+          tx.set(rosterRef, {
+            players: next.players,
+            retired: next.retired,
+            updatedAt: fs.serverTimestamp()
+          }, {merge: false});
+        });
+        rq.shift();
+        rBackoff = 2000;
+      } catch (e){
+        job.tries++;
+        if (job.tries >= 6){
+          rq.shift();
+          rBackoff = 2000;
+          onRosterFail(job.op);
+          continue;
+        }
+        await new Promise(function(r){ setTimeout(r, rBackoff); });
+        rBackoff = Math.min(rBackoff * 2, 30000);
+      }
+    }
+    rDraining = false;
+  }
+
+  let rosterSeeded = false;
   fs.onSnapshot(rosterRef, function(snap){
-    const data = snap.exists() ? (snap.data() || {}) : null;
-    if (data && Array.isArray(data.players)) onRoster(data.players);
-    else if (!snap.metadata.fromCache) onRoster(null);   /* nothing stored yet */
+    const doc = cleanDoc(snap.exists() ? (snap.data() || {}) : null);
+    if (doc.players.length) onRoster(doc, rosterPending());
+    /* Nothing stored yet: publish what this device is carrying, so the next
+       phone to open the link starts from the same list rather than a default.
+       Only once, only against the server, and the op itself refuses to overwrite
+       a sheet that turns out to have a roster after all. */
+    else if (!snap.metadata.fromCache && !rosterSeeded){
+      rosterSeeded = true;
+      if (typeof rosterSeed === "function"){
+        const mine = rosterSeed();
+        if (mine && mine.length) rosterOp({t: "seed", players: mine});
+      }
+    }
   }, function(){});
 
-  return {savePicks: savePicks, saveResult: saveResult, saveRoster: saveRoster, pending: inflight};
+  return {savePicks: savePicks, saveResult: saveResult, rosterOp: rosterOp,
+          rosterPending: rosterPending, pending: inflight};
 }
