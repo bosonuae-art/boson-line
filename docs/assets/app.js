@@ -17,7 +17,6 @@ MIN:["Vikings","NFC North"],NE:["Patriots","AFC East"],NO:["Saints","NFC South"]
 NYJ:["Jets","AFC East"],PHI:["Eagles","NFC East"],PIT:["Steelers","AFC North"],SEA:["Seahawks","NFC West"],
 SF:["49ers","NFC West"],TB:["Buccaneers","NFC South"],TEN:["Titans","AFC South"],WAS:["Commanders","NFC East"]
 };
-const NAME = {bo:"Bo", dad:"Dad"};
 
 const GAMES = SCHED.map(function(r){
   return {wk:r[0], a:r[1], h:r[2], fav:r[3], sp:(typeof r[4]==="number"?r[4]:null), day:r[5],
@@ -45,6 +44,48 @@ const LS = {
   get:function(k,d){ try{ const v = localStorage.getItem(k); return v===null ? d : JSON.parse(v); }catch(e){ return d; } },
   set:function(k,v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
 };
+/* ------------------------------------------------------------------ the roster
+   Players are a list, not two hardcoded columns. Ids are permanent and are what
+   picks are filed under; names are just labels and can be changed by anyone. The
+   roster is shared through Firestore, because a player Dad adds has to exist on
+   Bo's phone too - a local-only roster would give each of them columns the other
+   could not see. Eight is the cap, which is where the colour slots run out. */
+const MAX_PLAYERS = 8;
+const DEFAULT_ROSTER = [{id:"bo", name:"Bo"}, {id:"dad", name:"Martin"}];
+let ROSTER = LS.get("bl.roster", null) || DEFAULT_ROSTER.map(function(p){ return {id:p.id, name:p.name}; });
+
+function ids(){ return ROSTER.map(function(p){ return p.id; }); }
+function nameOf(who){
+  if (who === "veg") return "Vegas";
+  for (let i = 0; i < ROSTER.length; i++) if (ROSTER[i].id === who) return ROSTER[i].name;
+  return who;
+}
+/* Colour is positional, so it stays put as long as the order does. */
+function slotOf(who){
+  if (who === "veg") return "pi-veg";
+  const i = ids().indexOf(who);
+  return "pi-" + ((i < 0 ? 0 : i % 8) + 1);
+}
+function newPlayerId(){
+  let id;
+  do { id = "p" + Math.random().toString(36).slice(2, 7); } while (ids().indexOf(id) >= 0);
+  return id;
+}
+/* Anything arriving from the shared sheet is another device's idea of the roster,
+   so it is bounded and scrubbed before it is trusted to render. */
+function cleanRoster(list){
+  if (!Array.isArray(list)) return null;
+  const out = [], seen = {};
+  list.forEach(function(p){
+    if (!p || typeof p.id !== "string") return;
+    const id = p.id.slice(0, 24).replace(/[^A-Za-z0-9_-]/g, "");
+    if (!id || seen[id] || out.length >= MAX_PLAYERS) return;
+    seen[id] = 1;
+    out.push({id: id, name: String(p.name == null ? id : p.name).slice(0, 24) || id});
+  });
+  return out.length ? out : null;
+}
+
 const state = {
   me: LS.get("bl.me", null),
   sealed: LS.get("bl.sealed", true),
@@ -88,19 +129,19 @@ function setDemo(on, silent){
     const d = buildDemo(SEED, BY_WEEK, WEEKS);
     real.live = LIVE;
     real.book = state.book;
-    real.touch = {bo: TOUCH.bo, dad: TOUCH.dad};
+    real.touch = Object.assign({}, TOUCH);
     demo.on = true;
     demo.now = d.now;
     LIVE = d.live;
     state.book = d.book;
-    TOUCH.bo = d.touch.bo; TOUCH.dad = d.touch.dad;
+    ids().forEach(function(id){ TOUCH[id] = d.touch[id] || d.touch.bo || 0; });
     state.week = DEMO_WEEK;
   } else {
     demo.on = false;
     LIVE = real.live || {};
     state.book = real.book || {};
-    TOUCH.bo = (real.touch && real.touch.bo) || 0;
-    TOUCH.dad = (real.touch && real.touch.dad) || 0;
+    Object.keys(TOUCH).forEach(function(k){ delete TOUCH[k]; });
+    Object.assign(TOUCH, real.touch || {});
     real.live = real.book = real.touch = null;
     state.week = defaultWeek();
   }
@@ -279,36 +320,51 @@ function isSealed(g, who){
 
 /* ------------------------------------------------------------------ scoring */
 function weekStats(wk){
-  const gs = BY_WEEK[wk] || [];
-  const s = {games:gs.length, decided:0, bo:0, dad:0, veg:0, boIn:0, dadIn:0,
-             cov:0, no:0, push:0, h2hBo:0, h2hDad:0, agreed:0};
+  const gs = BY_WEEK[wk] || [], list = ids();
+  const s = {games:gs.length, decided:0, veg:0, cov:0, no:0, push:0, agreed:0,
+             hit:{}, made:{}};
+  list.forEach(function(id){ s.hit[id] = 0; s.made[id] = 0; });
   for (let i=0;i<gs.length;i++){
-    const g = gs[i];
-    const pb = pickOf(wk,g.key,"bo"), pd = pickOf(wk,g.key,"dad");
-    if (pb) s.boIn++;
-    if (pd) s.dadIn++;
+    const g = gs[i], picks = {};
+    list.forEach(function(id){
+      const p = pickOf(wk, g.key, id);
+      picks[id] = p;
+      if (p) s.made[id]++;
+    });
     const res = resultOf(wk, g.key);
     if (!res) continue;
     s.decided++;
-    if (pb === res.w) s.bo++;
-    if (pd === res.w) s.dad++;
+    list.forEach(function(id){ if (picks[id] === res.w) s.hit[id]++; });
     if (g.fav === res.w) s.veg++;
-    if (pb && pd){
-      if (pb === pd) s.agreed++;
-      else { if (pb === res.w) s.h2hBo++; if (pd === res.w) s.h2hDad++; }
-    }
+    const given = list.map(function(id){ return picks[id]; }).filter(Boolean);
+    if (given.length > 1 && given.every(function(v){ return v === given[0]; })) s.agreed++;
     const a = atsOf(g, res);
     if (a === "cov") s.cov++; else if (a === "no") s.no++; else if (a === "push") s.push++;
   }
   return s;
 }
+/* Whoever is clear of the field; null while it is a tie or nothing is decided. */
+function leaderOf(s){
+  const list = ids();
+  if (!s.decided || !list.length) return null;
+  let best = -1, who = [];
+  list.forEach(function(id){
+    const n = s.hit[id] || 0;
+    if (n > best){ best = n; who = [id]; }
+    else if (n === best) who.push(id);
+  });
+  return who.length === 1 ? who[0] : null;
+}
 function seasonStats(){
-  const t = {games:0, decided:0, bo:0, dad:0, veg:0, boIn:0, dadIn:0,
-             cov:0, no:0, push:0, h2hBo:0, h2hDad:0, agreed:0, weeks:[]};
-  const keys = ["games","decided","bo","dad","veg","boIn","dadIn","cov","no","push","h2hBo","h2hDad","agreed"];
+  const list = ids();
+  const t = {games:0, decided:0, veg:0, cov:0, no:0, push:0, agreed:0,
+             hit:{}, made:{}, weeks:[]};
+  list.forEach(function(id){ t.hit[id] = 0; t.made[id] = 0; });
+  const keys = ["games","decided","veg","cov","no","push","agreed"];
   WEEKS.forEach(function(w){
     const s = weekStats(w); s.wk = w; t.weeks.push(s);
     keys.forEach(function(k){ t[k] += s[k]; });
+    list.forEach(function(id){ t.hit[id] += s.hit[id] || 0; t.made[id] += s.made[id] || 0; });
   });
   return t;
 }
@@ -544,16 +600,28 @@ function encodePicks(who){
     for (let j=4;j>=0;j--) v = v * 3 + (vals[i+j] || 0);
     bytes.push(v);
   }
-  return "BL1" + (who === "bo" ? "B" : "D") + b64(bytes);
+  return "BL2." + who + "." + b64(bytes);
 }
 function decodePicks(code){
   const c = String(code || "").trim().replace(/\s+/g, "");
-  if (c.slice(0,3) !== "BL1") return null;
-  const tag = c.charAt(3);
-  const who = tag === "B" ? "bo" : tag === "D" ? "dad" : null;
+  let who = null, payload = "";
+  if (c.slice(0,4) === "BL2."){
+    /* BL2.<player id>.<data> - the id is the whole point, since with a roster
+       there is no longer a fixed pair to encode as one letter. */
+    const dot = c.indexOf(".", 4);
+    if (dot < 0) return null;
+    who = c.slice(4, dot);
+    payload = c.slice(dot + 1);
+    if (!/^[A-Za-z0-9_-]{1,24}$/.test(who)) return null;
+  } else if (c.slice(0,3) === "BL1"){
+    /* The original two-player format, kept so codes written before the roster
+       existed - including the one this season was rescued from - still load. */
+    who = c.charAt(3) === "B" ? "bo" : c.charAt(3) === "D" ? "dad" : null;
+    payload = c.slice(4);
+  }
   if (!who) return null;
   let bytes;
-  try { bytes = unb64(c.slice(4)); } catch(e){ return null; }
+  try { bytes = unb64(payload); } catch(e){ return null; }
   if (bytes.length < Math.ceil(GAMES.length / 5)) return null;
   const vals = [];
   for (let i=0;i<bytes.length;i++){
@@ -582,18 +650,19 @@ function applyCode(code){
   });
   state.imported[d.who] = new Date().toISOString();
   LS.set("bl.imported", state.imported);
-  flash(NAME[d.who] + "'s sheet loaded - " + d.count + " picks across the season.");
+  flash(nameOf(d.who) + "'s sheet loaded - " + d.count + " picks across the season.");
   render();
 }
 
 /* ------------------------------------------------------------------ render: masthead */
 function renderScoreline(){
-  const s = seasonStats();
-  const lead = s.decided === 0 || s.bo === s.dad ? null : (s.bo > s.dad ? "bo" : "dad");
+  const s = seasonStats(), lead = leaderOf(s);
+  const rows = ids().map(function(id){ return [id, nameOf(id), s.hit[id] || 0]; });
+  rows.push(["veg", "Vegas", s.veg]);
   document.getElementById("scoreline").innerHTML =
-    [["bo","Bo",s.bo],["dad","Dad",s.dad],["veg","Vegas",s.veg]].map(function(r){
-      return '<span class="sc ' + r[0] + (lead === r[0] ? " lead" : "") + '">' +
-        '<span class="n">' + r[1] + '</span>' +
+    rows.map(function(r){
+      return '<span class="sc ' + slotOf(r[0]) + (lead === r[0] ? " lead" : "") + '">' +
+        '<span class="n">' + esc(r[1]) + '</span>' +
         '<span class="v">' + r[2] + '-' + (s.decided - r[2]) + '</span></span>';
     }).join("") + '<span class="pulling" id="pulling">pulling</span>';
   let anyLive = false;
@@ -626,12 +695,13 @@ function renderWeekHead(){
   document.getElementById("weekTitle").textContent = "Week " + wk;
   const byes = Object.keys(BYES).filter(function(t){ return BYES[t] === wk; }).sort();
   const bits = [s.games + " games"];
-  if (state.me) bits.push((state.me === "bo" ? s.boIn : s.dadIn) + " of " + s.games + " picked");
-  if (s.decided) bits.push("Bo " + s.bo + ", Dad " + s.dad + ", Vegas " + s.veg);
+  if (state.me) bits.push((s.made[state.me] || 0) + " of " + s.games + " picked");
+  if (s.decided) bits.push(ids().map(function(id){ return nameOf(id) + " " + (s.hit[id] || 0); })
+                                .concat("Vegas " + s.veg).join(", "));
   if (byes.length) bits.push("bye: " + byes.join(", "));
   /* The number that drives the visit - how many games still want a pick - leads
      the line, because on a phone it is the only part of it anyone reads. */
-  const left = state.me ? s.games - (state.me === "bo" ? s.boIn : s.dadIn) : 0;
+  const left = state.me ? s.games - (s.made[state.me] || 0) : 0;
   const lead = left > 0 ? '<b class="todo">' + left + ' to pick</b>' : "";
   document.getElementById("weekSaid").innerHTML = lead + esc(bits.join(" · "));
   const i = WEEKS.indexOf(wk);
@@ -707,10 +777,10 @@ function renderSync(){
      made before touch existed carry no timestamp, and reporting those as "hasn't
      picked yet" while their column is full is worse than saying nothing. */
   const ws = weekStats(state.week);
-  ["bo","dad"].forEach(function(w){
+  ids().forEach(function(w){
     const you = (w === state.me);
-    const label = you ? "You" : NAME[w];
-    const n = (w === "bo") ? ws.boIn : ws.dadIn;
+    const label = you ? "You" : nameOf(w);
+    const n = ws.made[w] || 0;
     /* The week is named directly above, so "this week" is noise. A timestamp on
        your own row is noise too - you know when you last touched it; what you
        cannot know without being told is when the other person did. */
@@ -729,10 +799,10 @@ function renderSync(){
    where there are. Your own column hides on a phone too: the button you tapped is
    already lit, so repeating it costs a third of the row for nothing. */
 function ledgerCell(g, res){
-  return '<div class="ledger">' + ["bo","dad","veg"].map(function(who){
-    const cls = ["who", who];
+  return '<div class="ledger">' + ids().concat("veg").map(function(who){
+    const cls = ["who", slotOf(who)];
     if (who === state.me) cls.push("self");
-    const label = (who === "veg") ? "Vegas" : NAME[who];
+    const label = nameOf(who);
     let body;
     if (who === "veg"){
       body = !g.fav ? '<span class="none">-</span>'
@@ -808,7 +878,7 @@ function renderGames(){
 
     function side(team){
       const c = ["pk"];
-      if (mine === team) c.push("mine", state.me);
+      if (mine === team) c.push("mine", slotOf(state.me));
       if (res && res.w !== "TIE"){ if (res.w === team) c.push("won"); else c.push("lost"); }
       const dis = (!state.me || locked || state.resMode) ? " disabled" : "";
       const title = locked ? "Locked at kickoff" : state.me ? "Pick " + team : "Say who you are first";
@@ -838,61 +908,103 @@ function renderDemoBar(){
     'so the sheet can be shown full. Nothing here is saved or shared.</span>' +
     '<button type="button" id="demoOff">Back to the real sheet</button>';
 }
+/* The sheet's column heads are the roster, so they are drawn rather than written.
+   Width is published as a custom property that the stylesheet reads, so the head
+   and every row stay in step without inline grid definitions on each one. */
+function renderSheetHead(){
+  const n = ids().length + 1;
+  document.documentElement.style.setProperty("--np", String(n));
+  document.documentElement.style.setProperty("--ledgerw", Math.max(138, n * 52) + "px");
+  const el = document.querySelector(".sheet-head .slots");
+  if (!el) return;
+  el.innerHTML = ids().concat("veg").map(function(id){
+    return '<span class="' + slotOf(id) + '">' + esc(nameOf(id)) + '</span>';
+  }).join("");
+}
 function renderNotice(){
   if (flashTimer) return;
   /* One banner at a time: in the sample, the sample explains itself. */
   document.getElementById("notice").innerHTML = (state.me || demo.on) ? "" :
-    '<div class="nudge">Say whether you&rsquo;re <b>Bo</b> or <b>Dad</b> up top to start picking. ' +
-    'Until then both columns stay sealed.</div>';
+    '<div class="nudge">Tap <b>' + esc(ids().length ? nameOf(ids()[0]) : "Players") +
+    '</b> up top to say which of you is picking. Until then every column stays sealed.</div>';
   document.getElementById("mast").classList.toggle("unset", !state.me);
 }
 function renderSwap(){
   const s = seasonStats(), bits = ["Bo has " + s.boIn + " of " + s.games + " in, Dad has " + s.dadIn + "."];
-  ["bo","dad"].forEach(function(w){
-    if (state.imported[w]) bits.push(NAME[w] + "'s code loaded " + stamp(state.imported[w]) + ".");
+  ids().forEach(function(w){
+    if (state.imported[w]) bits.push(nameOf(w) + "'s code loaded " + stamp(state.imported[w]) + ".");
   });
   document.getElementById("swapSaid").textContent = bits.join(" ");
 }
 
 /* ------------------------------------------------------------------ standings */
 function renderStandings(){
-  const s = seasonStats();
+  const s = seasonStats(), list = ids();
   const chart = s.decided
     ? '<section class="sec"><h3>Running total</h3><p class="cap">Correct picks, adding up week by week.</p>' +
       lineChart(s) + '</section>'
     : '<section class="sec"><h3>Running total</h3><p class="cap">Nothing settled yet &mdash; the line starts ' +
       'moving once Week 1 finals land. Until then the ledger below shows who has picks in.</p></section>';
+
+  const head = '<tr><th>Week</th><th>Played</th>' +
+    list.map(function(id){ return '<th class="pcol ' + slotOf(id) + '">' + esc(nameOf(id)) + '</th>'; }).join("") +
+    '<th class="pcol pi-veg">Vegas</th><th>Leader</th><th>By</th></tr>';
+
+  function marginRow(w){
+    const lead = leaderOf(w);
+    if (!w.decided) return ["-", ""];
+    if (!lead) return ["tied", ""];
+    const scores = list.map(function(id){ return w.hit[id] || 0; }).sort(function(a,b){ return b-a; });
+    return [nameOf(lead), scores.length > 1 ? "+" + (scores[0] - scores[1]) : ""];
+  }
   const rows = s.weeks.map(function(w){
-    const done = w.decided > 0;
-    let leader = "-", by = "";
-    if (done){
-      if (w.bo === w.dad) leader = "tied";
-      else { leader = w.bo > w.dad ? "Bo" : "Dad"; by = "+" + Math.abs(w.bo - w.dad); }
-    }
+    const done = w.decided > 0, m = marginRow(w);
     return '<tr' + (done ? "" : ' class="wait"') + '><td>Week ' + w.wk + '</td>' +
       '<td class="n">' + w.decided + '/' + w.games + '</td>' +
-      '<td class="n">' + (done ? w.bo : "-") + '</td><td class="n">' + (done ? w.dad : "-") + '</td>' +
+      list.map(function(id){ return '<td class="n">' + (done ? (w.hit[id] || 0) : "-") + '</td>'; }).join("") +
       '<td class="n">' + (done ? w.veg : "-") + '</td>' +
-      '<td>' + leader + '</td><td class="n">' + by + '</td></tr>';
+      '<td>' + esc(m[0]) + '</td><td class="n">' + m[1] + '</td></tr>';
   }).join("");
+  const ms = marginRow(s);
   const tot = '<tr class="tot"><td>Season</td><td class="n">' + s.decided + '/' + s.games + '</td>' +
-    '<td class="n">' + s.bo + '</td><td class="n">' + s.dad + '</td><td class="n">' + s.veg + '</td>' +
-    '<td>' + (s.decided ? (s.bo === s.dad ? "tied" : (s.bo > s.dad ? "Bo" : "Dad")) : "-") + '</td>' +
-    '<td class="n">' + (s.decided && s.bo !== s.dad ? "+" + Math.abs(s.bo - s.dad) : "") + '</td></tr>';
+    list.map(function(id){ return '<td class="n">' + (s.hit[id] || 0) + '</td>'; }).join("") +
+    '<td class="n">' + s.veg + '</td>' +
+    '<td>' + esc(ms[0]) + '</td><td class="n">' + ms[1] + '</td></tr>';
+
+  const who = list.length === 2 ? "the two of you" : "all " + (list.length + 1) + " of you";
   const ledger = '<section class="sec"><h3>The ledger</h3>' +
-    '<p class="cap">Every week of the season, and where it left the three of you.</p>' +
-    '<div class="tblwrap"><table><thead><tr><th>Week</th><th>Played</th>' +
-    '<th class="bocol">Bo</th><th class="dadcol">Dad</th><th class="vegcol">Vegas</th>' +
-    '<th>Leader</th><th>By</th></tr></thead><tbody>' + rows + tot + '</tbody></table></div></section>';
+    '<p class="cap">Every week of the season, and where it left ' + who + '.</p>' +
+    '<div class="tblwrap"><table><thead>' + head + '</thead><tbody>' + rows + tot + '</tbody></table></div></section>';
+
+  /* Head to head only means anything between exactly two people; with more it is
+     a table, not a number, and the ledger above already is that table. */
+  let h2h = "";
+  if (list.length === 2){
+    let a = 0, b = 0;
+    WEEKS.forEach(function(wk){
+      (BY_WEEK[wk] || []).forEach(function(g){
+        const res = resultOf(wk, g.key);
+        if (!res) return;
+        const pa = pickOf(wk, g.key, list[0]), pb = pickOf(wk, g.key, list[1]);
+        if (!pa || !pb || pa === pb) return;
+        if (pa === res.w) a++;
+        if (pb === res.w) b++;
+      });
+    });
+    h2h = row2("Head to head", a + "-" + b);
+  }
   const dl = '<section class="sec"><h3>Against the book</h3>' +
     '<p class="cap">Vegas picks the preseason favorite in all 272 games, so it is the pace to beat.</p>' +
     '<div class="dl">' +
-      row2("Bo", s.bo + "-" + (s.decided - s.bo) + "  " + pct(s.bo, s.decided)) +
-      row2("Dad", s.dad + "-" + (s.decided - s.dad) + "  " + pct(s.dad, s.decided)) +
+      list.map(function(id){
+        const n = s.hit[id] || 0;
+        return row2(nameOf(id), n + "-" + (s.decided - n) + "  " + pct(n, s.decided));
+      }).join("") +
       row2("Vegas", s.veg + "-" + (s.decided - s.veg) + "  " + pct(s.veg, s.decided)) +
-      row2("Bo against Vegas", signed(s.bo - s.veg)) +
-      row2("Dad against Vegas", signed(s.dad - s.veg)) +
-      row2("Head to head", s.h2hBo + "-" + s.h2hDad) +
+      list.map(function(id){
+        return row2(nameOf(id) + " against Vegas", signed((s.hit[id] || 0) - s.veg));
+      }).join("") +
+      h2h +
       row2("Picked the same way", s.agreed + " games") +
       row2("Favorites against the spread", s.cov + "-" + s.no + (s.push ? "-" + s.push : "")) +
     '</div><div class="swap"><button type="button" class="btn" id="csvBtn">Download the season as CSV</button></div>' +
@@ -903,15 +1015,34 @@ function renderStandings(){
 }
 function row2(k, v){ return '<div><dt>' + esc(k) + '</dt><dd>' + esc(v) + '</dd></div>'; }
 function lineChart(s){
-  const pts = {bo:[], dad:[], veg:[]}, labels = [];
-  let cb = 0, cd = 0, cv = 0;
+  /* One series per player plus Vegas. Colours come from the same slot variables
+     the rest of the app uses, resolved off a probe element because SVG needs a
+     real colour and var(--p1) means nothing outside a styled element. */
+  const list = ids().concat("veg"), labels = [];
+  const pts = {}, run = {};
+  list.forEach(function(id){ pts[id] = []; run[id] = 0; });
   s.weeks.forEach(function(w){
     if (!w.decided) return;
-    cb += w.bo; cd += w.dad; cv += w.veg;
-    labels.push(w.wk); pts.bo.push(cb); pts.dad.push(cd); pts.veg.push(cv);
+    labels.push(w.wk);
+    list.forEach(function(id){
+      run[id] += (id === "veg") ? w.veg : (w.hit[id] || 0);
+      pts[id].push(run[id]);
+    });
   });
+
+  const probe = document.createElement("span");
+  probe.style.display = "none";
+  document.body.appendChild(probe);
+  const colour = {};
+  list.forEach(function(id){
+    probe.className = slotOf(id);
+    colour[id] = getComputedStyle(probe).getPropertyValue("--p").trim() || "currentColor";
+  });
+  probe.remove();
+
   const W = 660, H = 240, L = 40, R = 16, T = 16, B = 30;
-  const maxY = Math.max(4, cb, cd, cv), n = labels.length;
+  const maxY = Math.max.apply(null, [4].concat(list.map(function(id){ return run[id]; })));
+  const n = labels.length;
   const x = function(i){ return L + (n === 1 ? (W-L-R)/2 : i * (W-L-R) / (n-1)); };
   const y = function(v){ return H - B - (v / maxY) * (H - T - B); };
   const path = function(a){ return a.map(function(v,i){ return (i?"L":"M") + x(i).toFixed(1) + " " + y(v).toFixed(1); }).join(" "); };
@@ -927,32 +1058,37 @@ function lineChart(s){
     g += '<text x="' + x(i).toFixed(1) + '" y="' + (H-9) + '" text-anchor="middle" font-size="10" ' +
          'fill="currentColor" fill-opacity=".5">' + w + '</text>';
   });
-  [["veg","var(--gold)"],["dad","var(--dad)"],["bo","var(--bo)"]].forEach(function(sr){
-    g += '<path d="' + path(pts[sr[0]]) + '" fill="none" stroke="' + sr[1] +
-         '" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></path>';
-    const i = pts[sr[0]].length - 1;
-    g += '<circle cx="' + x(i).toFixed(1) + '" cy="' + y(pts[sr[0]][i]).toFixed(1) + '" r="3.2" fill="' + sr[1] + '"></circle>';
+  /* Vegas underneath, so a player's line is never hidden by the pace-setter. */
+  list.slice().reverse().forEach(function(id){
+    const a = pts[id];
+    if (!a.length) return;
+    g += '<path d="' + path(a) + '" fill="none" stroke="' + colour[id] +
+         '" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></path>' +
+         '<circle cx="' + x(a.length-1).toFixed(1) + '" cy="' + y(a[a.length-1]).toFixed(1) +
+         '" r="3.2" fill="' + colour[id] + '"></circle>';
   });
   return '<div class="tblwrap"><svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" height="' + H +
     '" role="img" aria-label="Cumulative correct picks by week">' + g + '</svg></div>' +
-    '<div class="legend"><span><i style="background:var(--bo)"></i>Bo ' + cb + '</span>' +
-    '<span><i style="background:var(--dad)"></i>Dad ' + cd + '</span>' +
-    '<span><i style="background:var(--gold)"></i>Vegas ' + cv + '</span></div>';
+    '<div class="legend">' + list.map(function(id){
+      return '<span><i style="background:' + colour[id] + '"></i>' + esc(nameOf(id)) + ' ' + run[id] + '</span>';
+    }).join("") + '</div>';
 }
 
 /* ------------------------------------------------------------------ teams */
 function renderTeams(){
+  const list = ids();
   const rows = Object.keys(TEAMS).map(function(t){
-    let fav = 0, bo = 0, dad = 0, w = 0, l = 0;
+    let fav = 0, w = 0, l = 0;
+    const backs = {};
+    list.forEach(function(id){ backs[id] = 0; });
     GAMES.forEach(function(g){
       if (g.a !== t && g.h !== t) return;
       if (g.fav === t) fav++;
-      if (pickOf(g.wk,g.key,"bo") === t) bo++;
-      if (pickOf(g.wk,g.key,"dad") === t) dad++;
+      list.forEach(function(id){ if (pickOf(g.wk, g.key, id) === t) backs[id]++; });
       const res = resultOf(g.wk, g.key);
       if (res){ if (res.w === t) w++; else if (res.w !== "TIE") l++; }
     });
-    return {t:t, nick:TEAMS[t][0], div:TEAMS[t][1], bye:BYES[t], fav:fav, bo:bo, dad:dad, w:w, l:l};
+    return {t:t, nick:TEAMS[t][0], div:TEAMS[t][1], bye:BYES[t], fav:fav, backs:backs, w:w, l:l};
   }).sort(function(a,b){ return b.fav - a.fav || a.t.localeCompare(b.t); });
   const played = rows.some(function(r){ return r.w + r.l > 0; });
   const body = rows.map(function(r){
@@ -963,7 +1099,7 @@ function renderTeams(){
       '<td style="color:var(--ink3)">' + esc(r.div) + '</td>' +
       '<td class="n">' + r.bye + '</td><td class="n">' + r.fav + '</td>' +
       '<td class="barcell"><span class="bar" style="width:' + (r.fav / 17 * 100).toFixed(1) + '%"></span></td>' +
-      '<td class="n">' + r.bo + '</td><td class="n">' + r.dad + '</td>' +
+      list.map(function(id){ return '<td class="n">' + r.backs[id] + '</td>'; }).join("") +
       '<td class="n">' + (played ? r.w + "-" + r.l : "-") + '</td></tr>';
   }).join("");
   document.getElementById("pane-teams").innerHTML =
@@ -971,21 +1107,25 @@ function renderTeams(){
     '<p class="cap">How many of its 17 games each team was favored in when the lines opened, in club colors. ' +
     'The Rams are favored in 16 and the Cardinals in none &mdash; the bar runs the full 17.</p>' +
     '<div class="tblwrap"><table><thead><tr><th>Team</th><th>Division</th><th>Bye</th>' +
-    '<th>Favored</th><th class="barcell"></th><th class="bocol">Bo backs</th>' +
-    '<th class="dadcol">Dad backs</th><th>Record</th></tr></thead><tbody>' + body + '</tbody></table></div></section>';
+    '<th>Favored</th><th class="barcell"></th>' +
+    list.map(function(id){ return '<th class="pcol ' + slotOf(id) + '">' + esc(nameOf(id)) + ' backs</th>'; }).join("") +
+    '<th>Record</th></tr></thead><tbody>' + body + '</tbody></table></div></section>';
 }
 
 /* ------------------------------------------------------------------ csv */
 function downloadCsv(){
-  const out = [["Week","Away","Home","Kickoff","Vegas preseason","Preseason line","Line now","Total",
-                "Bo","Dad","Winner","By","Favorite covered"].join(",")];
+  const list = ids();
+  const q = function(v){ return /[",]/.test(String(v)) ? '"' + String(v).replace(/"/g, '""') + '"' : v; };
+  const out = [["Week","Away","Home","Kickoff","Vegas preseason","Preseason line","Line now","Total"]
+                .concat(list.map(function(id){ return q(nameOf(id)); }))
+                .concat(["Winner","By","Favorite covered"]).join(",")];
   GAMES.forEach(function(g){
     const m = marketLine(g), res = resultOf(g.wk,g.key), lv = liveOf(g.wk,g.key), a = atsOf(g,res);
     out.push([g.wk, g.a, g.h, lv && lv.k ? lv.k : "", g.fav || "", g.sp === null ? "" : g.sp,
-      m && m.src === "live" ? m.fav + " -" + m.sp : "", m && typeof m.ou === "number" ? m.ou : "",
-      pickOf(g.wk,g.key,"bo") || "", pickOf(g.wk,g.key,"dad") || "",
+      m && m.src === "live" ? m.fav + " -" + m.sp : "", m && typeof m.ou === "number" ? m.ou : ""
+      ].concat(list.map(function(id){ return pickOf(g.wk, g.key, id) || ""; })).concat([
       res ? res.w : "", res && res.by !== null ? res.by : "",
-      a === "cov" ? "yes" : a === "no" ? "no" : a === "push" ? "push" : ""].join(","));
+      a === "cov" ? "yes" : a === "no" ? "no" : a === "push" ? "push" : ""]).join(","));
   });
   const blob = new Blob([out.join("\n")], {type:"text/csv;charset=utf-8"});
   const url = URL.createObjectURL(blob);
@@ -1021,8 +1161,10 @@ function render(){
     : function(fn){ requestAnimationFrame(fn); };
   schedule(function(){
     queued = false;
-    document.getElementById("who-bo").setAttribute("aria-pressed", String(state.me === "bo"));
-    document.getElementById("who-dad").setAttribute("aria-pressed", String(state.me === "dad"));
+    const wb = document.getElementById("whoBtn");
+    wb.className = state.me ? slotOf(state.me) : "";
+    document.getElementById("whoName").textContent = state.me ? nameOf(state.me) : "Who are you?";
+    if (!document.getElementById("roster").hidden) renderRoster();
     const sb = document.getElementById("sealBtn");
     sb.setAttribute("aria-pressed", String(state.sealed));
     sb.textContent = state.sealed ? "Sealed" : "Open";
@@ -1037,7 +1179,7 @@ function render(){
     renderDemoBar();
     renderNotice();
     if (state.tab === "picks"){
-      renderWeeks(); renderWeekHead(); renderLiveBar(); renderSwap();
+      renderWeeks(); renderWeekHead(); renderLiveBar(); renderSwap(); renderSheetHead();
       const ae = document.activeElement, gel = document.getElementById("games");
       if (!(ae && ae.tagName === "INPUT" && gel.contains(ae))) renderGames();
     }
@@ -1070,9 +1212,82 @@ function setTab(name){
 ["picks","standings","teams"].forEach(function(t){
   document.getElementById("tab-" + t).addEventListener("click", function(){ setTab(t); });
 });
-document.getElementById("who-bo").addEventListener("click", function(){ setMe("bo"); });
-document.getElementById("who-dad").addEventListener("click", function(){ setMe("dad"); });
 function setMe(who){ state.me = (state.me === who) ? null : who; LS.set("bl.me", state.me); render(); }
+
+/* ------------------------------------------------------------------ roster ui */
+function saveRoster(next, why){
+  ROSTER = next;
+  LS.set("bl.roster", ROSTER);
+  /* If the person you were is no longer on the list, you are nobody again. */
+  if (state.me && ids().indexOf(state.me) < 0){ state.me = null; LS.set("bl.me", null); }
+  if (store && !demo.on && store.saveRoster) store.saveRoster(ROSTER).catch(function(){});
+  render();
+  if (why) flash(why);
+}
+function openRoster(open){
+  const el = document.getElementById("roster");
+  el.hidden = !open;
+  document.getElementById("whoBtn").setAttribute("aria-expanded", String(!!open));
+  if (open) renderRoster();
+}
+function renderRoster(){
+  const list = document.getElementById("rlist");
+  /* Never redraw while someone is mid-word in a name field. */
+  const ae = document.activeElement;
+  if (ae && ae.tagName === "INPUT" && list.contains(ae)) return;
+  list.innerHTML = ROSTER.map(function(p, i){
+    const me = (p.id === state.me);
+    return '<li class="' + slotOf(p.id) + (me ? " me" : "") + '">' +
+      '<button type="button" class="pickme" data-id="' + esc(p.id) + '" aria-pressed="' + me + '">' +
+        '<span class="dot" aria-hidden="true"></span>' +
+        '<span class="lbl">' + (me ? "You" : "Pick as") + '</span>' +
+      '</button>' +
+      '<input type="text" class="rname" data-id="' + esc(p.id) + '" value="' + esc(p.name) + '"' +
+        ' maxlength="24" aria-label="Name for player ' + (i + 1) + '" spellcheck="false">' +
+      '<button type="button" class="rdel" data-id="' + esc(p.id) + '" aria-label="Remove ' +
+        esc(p.name) + '"' + (ROSTER.length <= 1 ? " disabled" : "") + '>&times;</button>' +
+    '</li>';
+  }).join("");
+  document.getElementById("addPlayer").disabled = ROSTER.length >= MAX_PLAYERS;
+}
+document.getElementById("whoBtn").addEventListener("click", function(){
+  openRoster(document.getElementById("roster").hidden);
+});
+document.getElementById("rosterDone").addEventListener("click", function(){ openRoster(false); });
+document.getElementById("rlist").addEventListener("click", function(e){
+  const pick = e.target.closest("button.pickme");
+  if (pick){ setMe(pick.dataset.id); renderRoster(); return; }
+  const del = e.target.closest("button.rdel");
+  if (!del) return;
+  const id = del.dataset.id, gone = ROSTER.filter(function(p){ return p.id === id; })[0];
+  if (!gone || ROSTER.length <= 1) return;
+  const before = ROSTER.slice();
+  saveRoster(ROSTER.filter(function(p){ return p.id !== id; }));
+  renderRoster();
+  /* Their picks are left where they are, so putting them back restores the lot. */
+  flash("Removed " + gone.name + ". Their picks are kept.", "Undo", function(){
+    saveRoster(before, "Put " + gone.name + " back.");
+    renderRoster();
+  });
+});
+document.getElementById("rlist").addEventListener("change", function(e){
+  const inp = e.target.closest("input.rname");
+  if (!inp) return;
+  const id = inp.dataset.id, name = inp.value.trim().slice(0, 24);
+  const next = ROSTER.map(function(p){
+    return p.id === id ? {id: p.id, name: name || p.name} : p;
+  });
+  if (!name) inp.value = nameOf(id);
+  saveRoster(next);
+});
+document.getElementById("addPlayer").addEventListener("click", function(){
+  if (ROSTER.length >= MAX_PLAYERS){ flash("Eight players is the limit."); return; }
+  const id = newPlayerId();
+  saveRoster(ROSTER.concat([{id: id, name: "Player " + (ROSTER.length + 1)}]));
+  renderRoster();
+  const inp = document.querySelector('#rlist input.rname[data-id="' + id + '"]');
+  if (inp){ inp.focus(); inp.select(); }
+});
 document.getElementById("sealBtn").addEventListener("click", function(){
   state.sealed = !state.sealed; LS.set("bl.sealed", state.sealed); render();
 });
@@ -1203,7 +1418,7 @@ function setStatus(kind, txt){
   el.querySelector(".txt").textContent = txt;
 }
 /* When each person last changed anything, straight off the server clock. */
-const TOUCH = {bo:0, dad:0};
+const TOUCH = {};
 /* Rows the other phone changed in the last few seconds, so the change is
    visible as it lands instead of just quietly being there. */
 const FRESH = {};
@@ -1223,7 +1438,7 @@ function mergeRemote(wk, doc, confirmed){
   Object.keys(p).forEach(function(k){
     if (!KEYS_BY_WEEK[wk] || !KEYS_BY_WEEK[wk][k]) return;
     const clean = {};
-    ["bo","dad"].forEach(function(w){ if (p[k] && p[k][w]) clean[w] = p[k][w]; });
+    ids().forEach(function(w){ if (p[k] && p[k][w]) clean[w] = p[k][w]; });
     if (Object.keys(clean).length) picks[k] = clean;
   });
   Object.keys(r).forEach(function(k){
@@ -1233,7 +1448,7 @@ function mergeRemote(wk, doc, confirmed){
 
   const t = (doc && doc.touch) || {};
   const marks = demo.on ? real.touch : TOUCH;
-  ["bo","dad"].forEach(function(w){
+  ids().forEach(function(w){
     const ms = tsMillis(t[w]);
     if (marks && ms > marks[w]) marks[w] = ms;
   });
@@ -1242,14 +1457,16 @@ function mergeRemote(wk, doc, confirmed){
      highlight. Only theirs - your own taps do not need announcing back to you. */
   const target = realBook();
   const before = (target[wk] && target[wk].picks) || {};
-  const them = state.me === "bo" ? "dad" : state.me === "dad" ? "bo" : null;
-  if (them && !demo.on){
+  const others = ids().filter(function(w){ return w !== state.me; });
+  if (state.me && others.length && !demo.on){
     const seen = {};
     Object.keys(picks).concat(Object.keys(before)).forEach(function(k){
       if (seen[k]) return;
       seen[k] = 1;
-      const a = (before[k] || {})[them] || null, b = (picks[k] || {})[them] || null;
-      if (a !== b) markFresh(wk, k);
+      const changed = others.some(function(w){
+        return ((before[k] || {})[w] || null) !== ((picks[k] || {})[w] || null);
+      });
+      if (changed) markFresh(wk, k);
     });
   }
 
@@ -1324,7 +1541,21 @@ function start(){
       onSwapCopyChange(state.shared);
       render();
     },
-    onSave: function(kind){ state.saving = kind; render(); }
+    onSave: function(kind){ state.saving = kind; render(); },
+    onRoster: function(list){
+      if (demo.on) return;
+      const clean = cleanRoster(list);
+      if (clean){
+        ROSTER = clean;
+        LS.set("bl.roster", ROSTER);
+        if (state.me && ids().indexOf(state.me) < 0){ state.me = null; LS.set("bl.me", null); }
+      } else if (store && store.saveRoster){
+        /* Nothing stored yet: publish what this device is carrying so the next
+           phone to open the link starts from the same list rather than a default. */
+        store.saveRoster(ROSTER).catch(function(){});
+      }
+      render();
+    }
   }).then(function(s){
     store = s;
     if ("serviceWorker" in navigator){

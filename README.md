@@ -19,6 +19,38 @@ The artifact came first and is kept because it still works. The Pages site exist
 **the artifact sandbox blocks every network call** — no `fetch`, no external images — which is
 also why a `db`-backed artifact can't be link-shared at all. A plain static page has neither limit.
 
+## Players
+
+Players are a list, not two hardcoded columns. **Ids are permanent** and are what
+picks are filed under; **names are labels** and anyone can change them. That split
+is what let Dad become Martin without touching a single stored pick — the id is
+still `dad`.
+
+The roster lives in Firestore at `seasons/2026/meta/roster`, not in `localStorage`,
+because a player one person adds has to exist on the other phones too; a local
+roster would give each device columns the others could not see. Cap is eight,
+which is where the colour slots run out.
+
+Colour is positional: eight `--p1…--p8` triples are defined per theme, an element
+gets a `pi-N` class, and everything player-coloured reads `var(--p)`. Before this
+there were exactly two colours named `--bo` and `--dad`, hardwired into a dozen
+selectors.
+
+Open the panel from the name button in the masthead. Tap a row to pick as that
+person, type in the field to rename, `×` to remove — removing only takes them off
+the list, their picks stay in the week documents, so putting them back restores
+everything. **There is no permission model**: same as the rest of this, anyone with
+the link can rename anyone or add a player. For a family sheet that is the right
+trade; if it ever isn't, the fix is the sign-in note below.
+
+Two knock-on changes worth knowing:
+
+- **Pick codes carry an id now** (`BL2.<id>.<data>`), since one letter cannot name
+  an arbitrary player. `BL1` codes still decode, which matters because this
+  season's Week 1 was rescued from one.
+- **Head to head** only appears with exactly two players. With more it is a table,
+  not a number, and the ledger already is that table.
+
 ## The live strip
 
 Under the week switcher, one line carries everything the sheet knows right now: what is under way (with

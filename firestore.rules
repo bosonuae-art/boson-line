@@ -34,7 +34,18 @@ service cloud.firestore {
         && (!('touch' in request.resource.data) || request.resource.data.touch is map)
         && (!('picks' in request.resource.data) || request.resource.data.picks.size() <= 16)
         && (!('results' in request.resource.data) || request.resource.data.results.size() <= 16)
-        && (!('touch' in request.resource.data) || request.resource.data.touch.keys().hasOnly(['bo', 'dad']));
+        && (!('touch' in request.resource.data) || request.resource.data.touch.size() <= 8);
+    }
+
+    /* The shared roster: who is playing and what each of them is called. Same
+       trust model as the picks - anyone with the link can change it - but it is
+       bounded to eight entries of two short fields so it cannot become storage. */
+    match /seasons/2026/meta/roster {
+      allow read: if true;
+      allow write: if request.resource.data.keys().hasOnly(['players', 'updatedAt'])
+        && request.resource.data.players is list
+        && request.resource.data.players.size() >= 1
+        && request.resource.data.players.size() <= 8;
     }
 
     match /{document=**} {

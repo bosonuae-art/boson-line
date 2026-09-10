@@ -21,6 +21,7 @@ function weekOf(id){
 
 export async function connect(opts){
   const onWeek = opts.onWeek, onStatus = opts.onStatus, onSave = opts.onSave || function(){};
+  const onRoster = opts.onRoster || function(){};
   const seed = opts.seed;
 
   if (!firebaseConfig || !firebaseConfig.projectId){
@@ -45,6 +46,9 @@ export async function connect(opts){
   }
 
   const docFor = function(wk){ return fs.doc(db, "seasons", SEASON, "weeks", "w" + wk); };
+  /* The roster is shared for the same reason the picks are: a player one phone
+     adds has to exist on the others, or they each see columns the rest cannot. */
+  const rosterRef = fs.doc(db, "seasons", SEASON, "meta", "roster");
 
   /* Failed writes go on a queue and are retried with backoff rather than
      dropped. A pick the app has already drawn on screen must eventually reach
@@ -145,5 +149,17 @@ export async function connect(opts){
     onStatus("error", "Shared sheet unreachable");
   });
 
-  return {savePicks: savePicks, saveResult: saveResult, pending: inflight};
+  async function saveRoster(players){
+    return fs.setDoc(rosterRef, {
+      players: players.map(function(p){ return {id: p.id, name: p.name}; }),
+      updatedAt: fs.serverTimestamp()
+    }, {merge: false});
+  }
+  fs.onSnapshot(rosterRef, function(snap){
+    const data = snap.exists() ? (snap.data() || {}) : null;
+    if (data && Array.isArray(data.players)) onRoster(data.players);
+    else if (!snap.metadata.fromCache) onRoster(null);   /* nothing stored yet */
+  }, function(){});
+
+  return {savePicks: savePicks, saveResult: saveResult, saveRoster: saveRoster, pending: inflight};
 }

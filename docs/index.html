@@ -41,13 +41,25 @@
     <span class="status local" id="status"><i></i><span class="txt">On this device</span></span>
     <div class="ident">
       <span class="lab">Picking as</span>
-      <div class="pair" role="group" aria-label="Who is picking">
-        <button type="button" class="bo" id="who-bo" aria-pressed="false">Bo</button>
-        <button type="button" class="dad" id="who-dad" aria-pressed="false">Dad</button>
-      </div>
+      <button type="button" id="whoBtn" aria-expanded="false" aria-controls="roster">
+        <span class="dot" aria-hidden="true"></span><span class="nm" id="whoName">Who are you?</span>
+      </button>
     </div>
   </div>
 </header>
+
+<div class="roster" id="roster" hidden>
+  <div class="rhead">
+    <h2>Players</h2>
+    <p>Tap a name to pick as that person. Type in a name to change it. Everyone on the
+    link sees the same list, so a change here shows up on the other phones too.</p>
+  </div>
+  <ul class="rlist" id="rlist"></ul>
+  <div class="ractions">
+    <button type="button" class="btn" id="addPlayer">Add a player</button>
+    <button type="button" class="btn key" id="rosterDone">Done</button>
+  </div>
+</div>
 
 <div class="demobar" id="demobar" role="status" hidden></div>
 
