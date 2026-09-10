@@ -3,42 +3,71 @@
 A pick sheet for Bo and Dad, built from Pete Holland's 2026 NFL workbook.
 Bo vs Dad vs Vegas, one point per correct call, same scoring as the spreadsheet.
 
-**Live app:** https://claude.ai/code/artifact/49b2c07f-1e36-45d4-867a-e0721a76ef5e
+**Site:** https://bosonuae-art.github.io/boson-line/
+**Artifact (older, private):** https://claude.ai/code/artifact/49b2c07f-1e36-45d4-867a-e0721a76ef5e
 
-## Sharing — why there's no shared database
+## Two builds, one set of data
 
-The first cut used the artifact `db` capability so both players wrote to one live ledger. That turned out to
-make the artifact **unshareable**: the share dialog greys out "Anyone with the link" with the reason
-*"This Artifact stores shared data, so it can't be shared publicly."* A db artifact is organization-internal,
-and on a personal account there is no way to add someone outside it.
+| | `docs/` — GitHub Pages | `index.html` — claude.ai artifact |
+|---|---|---|
+| Shareable | Any link | Only inside the owner's org |
+| Odds & scores | Fetched live from ESPN in the browser | Baked in; needs a republish to refresh |
+| Club marks | Loaded from ESPN's CDN | Embedded as data URIs (~260 KB) |
+| Shared picks | Firestore, live between both phones | None — pick codes only |
 
-So `db` was dropped. Picks now live in each device's `localStorage`, and the two sheets are reconciled with a
-**pick code** — the whole season packed into ~78 characters (one base-3 digit per game, five to a byte,
-base64url, prefixed `BL1B` for Bo or `BL1D` for Dad). Copy yours, text it over, paste theirs. The app also
-accepts `#p=<code>` on the URL.
+The artifact came first and is kept because it still works. The Pages site exists because
+**the artifact sandbox blocks every network call** — no `fetch`, no external images — which is
+also why a `db`-backed artifact can't be link-shared at all. A plain static page has neither limit.
+
+## Finishing the Firestore setup
+
+Picks sync through Firestore when `docs/config.js` names a project. Until then the site runs on
+`localStorage` and the season pick-code, and the status pill in the header reads *On this device*.
+
+1. [console.firebase.google.com](https://console.firebase.google.com) → **Add project**
+2. **Build → Firestore Database → Create database → production mode**
+3. **Build → Authentication → Sign-in method → enable Anonymous**
+4. **⚙ Project settings → General → Your apps → Web (`</>`)** → register → copy `firebaseConfig`
+5. Paste it into `docs/config.js`, replacing `export const firebaseConfig = null;`
+6. **Firestore → Rules** → paste `firestore.rules` from this repo → Publish
+7. Commit and push; Pages redeploys in about a minute
+
+The config is safe to commit — it identifies the project, it does not grant access. `firestore.rules`
+is what decides who may read and write. See the comments in that file for how to tighten it from
+"anyone signed in anonymously" to two named accounts.
+
+Data model: `seasons/2026/weeks/w1` … `w18`, each `{ picks: {AWAY@HOME: {bo, dad}}, results: {...}, updatedAt }`.
+On first connect, if the shared sheet is empty and the device is carrying a season, it pushes it up once.
 
 ## What's here
 
 | File | What it is |
 |---|---|
-| `index.html` | The built app. **Don't hand-edit it** — edit `template.html` and rebuild. |
-| `template.html` | The real source, with `__SCHED__`, `__BYES__`, `__LIVE__`, `__SYNCED__` placeholders. |
-| `tools/gen.py` | Reads `2026 NFL .xlsx` → `tools/data2026.json` (272 games, preseason lines, byes). Run once. |
-| `tools/sync.py` | Pulls all 18 weeks from ESPN → `tools/live/w1..w18.json` (kickoffs, DraftKings lines, totals, moneylines, live scores, finals). |
-| `tools/build.py` | Injects the data sets into `template.html` → `index.html`, and escapes every non-ASCII character inside the `<script>` block so the page can't mojibake. |
-| `tools/logos.py` | Downloads all 32 club marks from ESPN (light + dark variants), scales to 48px and base64-encodes them into `tools/logos.json`. Run once. |
-| `tools/accents.py` | Derives a theme-safe accent per club from its brand colors — keeps hue and saturation, moves lightness into a band that clears 3:1 contrast on both grounds. Without this, the Raiders and Steelers (`#000000`) vanish on the dark theme and the Saints (`#d3bc8d`) vanish on the light one. Writes back into `logos.json`. |
-| `bo_code.txt` | Bo's 271 picks as a pick code, rescued from the old database before `db` was dropped. |
+| `docs/index.html` | The Pages site. |
+| `docs/assets/app.js` | The whole app: schedule, picks, scoring, ESPN fetching, rendering. |
+| `docs/assets/store.js` | Firestore bridge. Degrades to local-only if no project is configured. |
+| `docs/assets/data.js` | Generated. Schedule, byes, club accents, logo slugs, and a seed ESPN snapshot for first paint. |
+| `docs/assets/styles.css` | Shared stylesheet (also the source for the artifact build's inline CSS). |
+| `docs/config.js` | Firebase config. Yours to fill in. |
+| `firestore.rules` | Paste into the Firebase console. |
+| `template.html` / `index.html` | Artifact source and build. Edit the template, never `index.html`. |
+| `bo_code.txt` | Bo's 271 picks as a pick code, rescued from the artifact database. |
 
-## Refreshing odds and scores
+### tools/
 
-The ESPN snapshot is embedded in the page, so refreshing it means republishing:
+| Script | Run when |
+|---|---|
+| `gen.py` | Once. Reads `2026 NFL .xlsx` → `data2026.json` (272 games, preseason lines, byes). |
+| `logos.py` | Once. Downloads 32 club marks (light + dark), scales and base64-encodes → `logos.json`. |
+| `accents.py` | Once, after `logos.py`. Derives a theme-safe accent per club. |
+| `sync.py` | Before an artifact republish. Pulls all 18 weeks from ESPN → `live/`. |
+| `build_site.py` | After `sync.py` or a schedule change → `docs/assets/data.js`. |
+| `build.py` | After `sync.py` → `index.html` for the artifact. |
 
-```bash
-cd tools && python sync.py && python build.py
-```
-
-…then republish `index.html` to the same artifact URL. Everyone open gets the new version automatically.
+`accents.py` exists because raw brand hex doesn't survive both themes: the Raiders and Steelers are
+`#000000` and vanish on the dark ground, the Saints are `#d3bc8d` and vanish on the light one. It keeps
+each club's hue and saturation and moves only lightness into a band that clears 3:1 contrast on both.
+All 32 pass.
 
 ## Data notes
 
@@ -49,6 +78,8 @@ cd tools && python sync.py && python build.py
   record can't drift. The "Line" column is the current market and is what against-the-spread is judged on.
 - Final scores arrive with the odds; hand entry is only an override, and is marked "by hand" in the app.
 - Games lock at kickoff. Where a kickoff time is missing, they lock when the week ends.
+- The Pages build refetches the viewed week every 30s while a game in it is live, every 10 minutes
+  otherwise, and whenever the tab regains focus.
 
 ## Design
 
@@ -59,6 +90,5 @@ families in the same three roles — Bricolage Grotesque (display), Public Sans 
 "voice": eyebrows, column heads, codes and figures).
 
 Club marks follow the portfolio's brand-icon rule — *real colored marks, never tinted silhouettes, never
-wordmarks*. They ship as data URIs because the artifact CSP blocks every external image host; light and dark
-variants both ship and CSS shows whichever suits the viewer's theme. Club color appears in exactly one place
-where it carries data: the favored-games bar on the Teams tab.
+wordmarks*. Light and dark variants both ship and CSS shows whichever suits the viewer's theme. Club color
+appears in exactly one place where it carries data: the favored-games bar on the Teams tab.
