@@ -1,22 +1,14 @@
-/* Firebase project config.
+/* Firebase project config for the shared pick sheet.
 
-   Paste the object Firebase gives you at:
-     Project settings -> General -> Your apps -> Web app -> SDK setup and configuration
+   These values identify the project; they do not grant access. What a caller may
+   read or write is decided entirely by firestore.rules in the repo root, which
+   confines anyone to the 18 week documents of the 2026 season. Firebase web
+   config is designed to ship in client code, which is why this is committed.
 
-   It is safe to commit. These values identify the project, they do not grant
-   access - firestore.rules in the repo root is what decides who may read and
-   write. Leave this as null and the app simply runs on this device only. */
-
-export const firebaseConfig = null;
-
-/* Once you have it, the line above becomes something like:
+   Set this back to null and the app quietly runs on this device only. */
 
 export const firebaseConfig = {
-  apiKey: "AIza...",
+  apiKey: "AIzaSyAAeO9pn0a6-xQFYK1fj4iv8CTv6micg0M",
   authDomain: "boson-line.firebaseapp.com",
-  projectId: "boson-line",
-  storageBucket: "boson-line.firebasestorage.app",
-  messagingSenderId: "000000000000",
-  appId: "1:000000000000:web:abcdef123456"
+  projectId: "boson-line"
 };
-*/

@@ -26,14 +26,12 @@ export async function connect(opts){
 
   let fs, db, colRef;
   try {
-    const [appMod, authMod, fsMod] = await Promise.all([
+    const [appMod, fsMod] = await Promise.all([
       import(SDK + "firebase-app.js"),
-      import(SDK + "firebase-auth.js"),
       import(SDK + "firebase-firestore.js")
     ]);
     fs = fsMod;
     const app = appMod.initializeApp(firebaseConfig);
-    await authMod.signInAnonymously(authMod.getAuth(app));
     db = fsMod.getFirestore(app);
     colRef = fsMod.collection(db, "seasons", SEASON, "weeks");
   } catch (e){

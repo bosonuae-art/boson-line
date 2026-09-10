@@ -2,26 +2,28 @@ rules_version = '2';
 
 /* The Boson Line - shared pick sheet.
 
-   Anyone who opens the site signs in anonymously, so "signed in" is not much of
-   a gate on its own. What these rules do guarantee is that a visitor can only
-   ever touch the 18 week documents of this one season, can only store the three
-   fields the app knows about, and cannot read or write anything else in the
-   project. Picks are small and replaceable; the real protection for a family
-   sheet is that the URL is not advertised.
+   There is no sign-in. Anonymous auth was the obvious thing to require here, but
+   it is not a real gate: anyone can mint an anonymous token in a single call, so
+   requiring one would have bought nothing except an extra product to configure.
 
-   To tighten this later, swap `request.auth != null` for a check against the two
-   real account IDs:
+   What these rules do enforce is that a caller can only ever touch the 18 week
+   documents of this one season, can only store the three fields the app knows
+   about, and cannot read or write anything else in the project. Picks are small
+   and replaceable. The practical protection for a family sheet is that the URL
+   is not advertised.
+
+   To lock this down properly later: enable a real sign-in provider (Google) in
+   the Firebase console, then gate on the two account IDs -
        allow read, write: if request.auth.uid in ['UID_ONE', 'UID_TWO'];
-   and switch the app from anonymous sign-in to Google sign-in. */
+   and have docs/assets/store.js sign in before it reads. */
 
 service cloud.firestore {
   match /databases/{database}/documents {
 
     match /seasons/2026/weeks/{week} {
-      allow read: if request.auth != null;
+      allow read: if true;
 
-      allow write: if request.auth != null
-        && week.matches('^w([1-9]|1[0-8])$')
+      allow write: if week.matches('^w([1-9]|1[0-8])$')
         && request.resource.data.keys().hasOnly(['picks', 'results', 'updatedAt'])
         && (!('picks' in request.resource.data) || request.resource.data.picks is map)
         && (!('results' in request.resource.data) || request.resource.data.results is map)
