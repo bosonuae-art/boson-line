@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>The Boson Line</title>
+<meta name="description" content="Bo vs Dad vs Vegas — the 2026 NFL pick sheet.">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#edefea" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0f1210" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E%F0%9F%8F%88%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://a.espncdn.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700&family=Martian+Mono:wght@400;500;600&family=Public+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="./assets/styles.css">
+</head>
+<body>
+
+<div class="atmos" aria-hidden="true"></div>
+<div class="bloom" aria-hidden="true"></div>
+
+<header class="mast" id="mast">
+  <div class="mast-row one">
+    <span class="word">The Boson Line<span class="yr">2026</span></span>
+    <span class="live" id="live"><i></i>LIVE</span>
+    <div class="scoreline" id="scoreline"></div>
+  </div>
+  <div class="mast-row two">
+    <nav class="tabs" role="tablist" aria-label="Sections">
+      <button type="button" role="tab" id="tab-picks" aria-selected="true" aria-controls="pane-picks">Picks</button>
+      <button type="button" role="tab" id="tab-standings" aria-selected="false" aria-controls="pane-standings">Standings</button>
+      <button type="button" role="tab" id="tab-teams" aria-selected="false" aria-controls="pane-teams">Teams</button>
+    </nav>
+    <span class="status local" id="status"><i></i><span class="txt">On this device</span></span>
+    <div class="ident">
+      <span class="lab">Picking as</span>
+      <div class="pair" role="group" aria-label="Who is picking">
+        <button type="button" class="bo" id="who-bo" aria-pressed="false">Bo</button>
+        <button type="button" class="dad" id="who-dad" aria-pressed="false">Dad</button>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+  <section id="pane-picks" role="tabpanel" aria-labelledby="tab-picks">
+    <div id="notice"></div>
+    <div class="whead">
+      <h2 id="weekTitle">Week 1</h2>
+      <span class="said" id="weekSaid"></span>
+      <div class="acts">
+        <button type="button" id="fillFav">Take every favorite</button>
+        <span class="sep">/</span>
+        <button type="button" id="clearWk">Clear mine</button>
+        <span class="sep">/</span>
+        <button type="button" id="sealBtn" aria-pressed="true">Sealed</button>
+        <span class="sep">/</span>
+        <button type="button" id="resBtn" aria-pressed="false">Enter results</button>
+      </div>
+    </div>
+    <div class="weeks" id="weeks" role="group" aria-label="Choose week"></div>
+    <div class="sheet-head">
+      <span class="colhead">Kickoff</span>
+      <span class="colhead">Matchup</span>
+      <span class="slots colhead"><span>Bo</span><span>Dad</span><span>Vegas</span></span>
+      <span class="colhead r">Line</span>
+      <span class="colhead r">Score</span>
+    </div>
+    <div id="games"></div>
+
+    <section class="sec" id="swapSec">
+      <h3>Swap sheets</h3>
+      <p class="cap" id="swapCap">Your picks live on this device. Copy your code, text it over, and paste theirs
+      to fill in their column &mdash; it carries the whole season, so one swap catches you up.</p>
+      <div class="swap">
+        <button type="button" class="btn key" id="copyMine">Copy my picks</button>
+        <input type="text" id="theirCode" placeholder="Paste their code here" spellcheck="false" aria-label="Their picks code">
+        <button type="button" class="btn" id="loadTheirs">Load</button>
+      </div>
+      <p class="said2" id="swapSaid"></p>
+    </section>
+
+    <details class="about">
+      <summary>About this sheet</summary>
+      <div class="body">
+        <p><b>Scoring.</b> A point for every game you call right, same as Dad&rsquo;s spreadsheet.
+        <b>Vegas</b> is the third player, and its pick is the preseason favorite off the 2026 sheet,
+        locked before kickoff so its record can&rsquo;t drift.</p>
+        <p><b>The line.</b> The Line column is the current DraftKings number by way of ESPN, with the move
+        off the preseason number underneath. Against-the-spread is judged on that current line.</p>
+        <p><b>Results.</b> Lines and final scores are pulled live from ESPN whenever you open a week, so
+        nothing here needs republishing. Hand entry is only for fixing something ESPN gets wrong. Games lock
+        at kickoff, and while the sheet is sealed you can&rsquo;t see the other column on a game until
+        you&rsquo;ve picked it yourself.</p>
+        <p><b>Sources.</b> Schedule, preseason lines and byes come from Pete Holland&rsquo;s 2026 workbook.
+        Kickoffs, live lines, totals, scores, club marks and team colors come from ESPN. Club marks are
+        used to identify the teams and belong to their clubs.</p>
+        <p class="stamp" id="stamp"></p>
+      </div>
+    </details>
+  </section>
+
+  <section id="pane-standings" role="tabpanel" aria-labelledby="tab-standings" hidden></section>
+  <section id="pane-teams" role="tabpanel" aria-labelledby="tab-teams" hidden></section>
+</main>
+
+<script type="module" src="./assets/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,36 @@
+rules_version = '2';
+
+/* The Boson Line - shared pick sheet.
+
+   Anyone who opens the site signs in anonymously, so "signed in" is not much of
+   a gate on its own. What these rules do guarantee is that a visitor can only
+   ever touch the 18 week documents of this one season, can only store the three
+   fields the app knows about, and cannot read or write anything else in the
+   project. Picks are small and replaceable; the real protection for a family
+   sheet is that the URL is not advertised.
+
+   To tighten this later, swap `request.auth != null` for a check against the two
+   real account IDs:
+       allow read, write: if request.auth.uid in ['UID_ONE', 'UID_TWO'];
+   and switch the app from anonymous sign-in to Google sign-in. */
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /seasons/2026/weeks/{week} {
+      allow read: if request.auth != null;
+
+      allow write: if request.auth != null
+        && week.matches('^w([1-9]|1[0-8])$')
+        && request.resource.data.keys().hasOnly(['picks', 'results', 'updatedAt'])
+        && (!('picks' in request.resource.data) || request.resource.data.picks is map)
+        && (!('results' in request.resource.data) || request.resource.data.results is map)
+        && (!('picks' in request.resource.data) || request.resource.data.picks.size() <= 16)
+        && (!('results' in request.resource.data) || request.resource.data.results.size() <= 16);
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
