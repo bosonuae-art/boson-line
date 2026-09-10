@@ -192,7 +192,9 @@ img{max-width:100%}
 .scoreline{display:flex; gap:6px 20px; margin-left:auto; align-items:baseline; flex-wrap:wrap;
   min-width:0}   /* four players and Vegas will not sit on one line forever */
 .sc{display:flex; align-items:baseline; gap:8px; padding-bottom:3px; border-bottom:2px solid transparent}
-.sc .n{font-size:9px; letter-spacing:.15em; text-transform:uppercase; color:var(--ink3); font-weight:500}
+.sc .n{font-size:9px; letter-spacing:.15em; text-transform:uppercase; color:var(--ink3); font-weight:500;
+  max-width:11ch; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  display:inline-block; vertical-align:bottom}   /* a long name must not stretch the masthead */
 .sc .v{font-size:13px; font-weight:600}
 .sc.lead{border-bottom-color:currentColor}
 .sc.lead{color:var(--p)}
@@ -205,11 +207,14 @@ img{max-width:100%}
 .tabs button:hover{color:var(--ink2)}
 .ident{display:flex; align-items:center; gap:9px}
 .ident .lab{font-size:12px; color:var(--ink3)}
-.ident .pair{display:flex; border:1px solid var(--rule2); border-radius:2px; overflow:hidden}
+
 .ident button{padding:4px 12px; font-size:12.5px; font-weight:600; color:var(--ink2); transition:background .18s, color .18s}
 .ident button + button{border-left:1px solid var(--rule2)}
-.ident button[aria-pressed="true"]{background:var(--p); color:var(--p-on)}
-.unset .ident .pair{box-shadow:0 0 0 3px var(--gold-bg)}
+
+/* Nobody has said who they are yet, so point at the control that fixes it.
+   This used to target .ident .pair, which the roster panel replaced - the rule
+   survived the rewrite and quietly stopped matching anything. */
+.unset .ident button{box-shadow:0 0 0 3px var(--gold-bg); border-color:var(--gold)}
 
 /* ------------------------------------------------------------------ week header */
 .whead{display:flex; align-items:flex-end; gap:16px; flex-wrap:wrap; padding:28px 0 0}
@@ -240,7 +245,9 @@ img{max-width:100%}
 .sheet-head, .game{display:grid;
   grid-template-columns:74px minmax(0,1fr) var(--ledgerw,138px) 104px 112px;
   gap:14px; align-items:center}
-.sheet-head{padding:16px 2px 7px; border-bottom:1px solid var(--rule2)}
+.sheet-head{padding:16px 2px 7px; border-bottom:1px solid var(--rule2);
+  position:sticky; top:0; z-index:5; background:var(--paper)}
+/* colour distinguishes players, but it never has to carry them alone */
 .sheet-head .r{text-align:right}
 .slots{display:grid; grid-template-columns:repeat(var(--np,3),minmax(0,1fr)); gap:4px; text-align:center}
 .sheet-head .slots span{color:var(--p)}
@@ -404,7 +411,10 @@ details.about b{color:var(--ink); font-weight:600}
 
   /* Your own pick is already lit on the button you pressed; saying it again
      costs a third of the row and tells you nothing. */
-  .ledger{display:flex; gap:0 16px; text-align:left; justify-content:flex-start}
+  /* Two players fit on one line; eight do not, and a flex row that cannot wrap
+     pushes the whole page sideways instead of stacking. */
+  .ledger{display:flex; flex-wrap:wrap; gap:3px 14px; text-align:left;
+    justify-content:flex-start; min-width:0}
   .ledger .who{display:inline-flex; align-items:baseline; gap:5px; padding:0}
   .ledger .who.self{display:none}
   .ledger i{display:inline; font-style:normal; font-size:8.5px; letter-spacing:.1em;

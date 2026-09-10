@@ -51,6 +51,27 @@ Two knock-on changes worth knowing:
 - **Head to head** only appears with exactly two players. With more it is a table,
   not a number, and the ledger already is that table.
 
+## What the audit changed
+
+A pass over the whole codebase after the roster work turned up seven defects,
+four of them shipped:
+
+| Severity | Defect |
+|---|---|
+| High | **Stored XSS through a player name.** Names are shared, so a name is untrusted input on everyone else's device. Every sink escaped it except the sync line, which assembles HTML for its separators. Proven with `<img onerror>` in a name: script executed on load. |
+| High | **A roster was only validated when it arrived from Firestore**, never when read back from this device's own storage. A 500-character name stretched the masthead to 3851px and a duplicated id drew the same player twice. `cleanRoster` now runs at every boundary. |
+| Medium | **`renderSwap` still read `s.boIn`/`s.dadIn`**, deleted in the roster refactor, so the Swap panel read *"Bo has undefined of 272 in, Dad has undefined."* |
+| Medium | **A player who joins in week 10 was shown as `0-145`** — scored as though they had lost every game they were never present for. Points still come out of every decided game, but a win-loss record now counts only games that player actually picked, with "(145 not picked)" alongside. |
+| Medium | **The phone ledger could not wrap.** Fine at two players; at eight it pushed the page 139px sideways. |
+| Low | **`.unset .ident .pair` survived the rewrite pointing at nothing** — the highlight that says "tell me who you are" had silently stopped matching any element. |
+| Low | Two blues (`--p1`/`--p7`) and two browns (`--p2`/`--p8`) sit at ΔE 16–19, confusable at ledger size. Only reachable at 7–8 players. Mitigated by making the sheet head sticky, so the names never scroll out of view and colour never carries identity alone. |
+
+Checked and found sound: all 16 palette combinations clear 4.5:1 on their own tint
+and 3:1 on the page, in both themes; no unnamed buttons, unlabelled inputs or
+missing alt text; tabs correctly wired to panels. Render cost is 2.7ms median at
+two players and 7.4ms at eight — an early reading of ~1s was background-tab timer
+clamping, not the app.
+
 ## The live strip
 
 Under the week switcher, one line carries everything the sheet knows right now: what is under way (with

@@ -52,7 +52,7 @@ const LS = {
    could not see. Eight is the cap, which is where the colour slots run out. */
 const MAX_PLAYERS = 8;
 const DEFAULT_ROSTER = [{id:"bo", name:"Bo"}, {id:"dad", name:"Martin"}];
-let ROSTER = LS.get("bl.roster", null) || DEFAULT_ROSTER.map(function(p){ return {id:p.id, name:p.name}; });
+let ROSTER = DEFAULT_ROSTER.map(function(p){ return {id:p.id, name:p.name}; });
 
 function ids(){ return ROSTER.map(function(p){ return p.id; }); }
 function nameOf(who){
@@ -73,6 +73,11 @@ function newPlayerId(){
 }
 /* Anything arriving from the shared sheet is another device's idea of the roster,
    so it is bounded and scrubbed before it is trusted to render. */
+/* Applied at every boundary, not just the remote one. A roster can also arrive
+   from this device's own storage - written by an older build, a half-finished
+   edit, or hand-editing - and "it came from localStorage" is not the same as
+   "it is well formed". A 500-character name stretched the scoreline to 3851px
+   and a duplicated id drew the same player twice, both from that path. */
 function cleanRoster(list){
   if (!Array.isArray(list)) return null;
   const out = [], seen = {};
@@ -322,8 +327,8 @@ function isSealed(g, who){
 function weekStats(wk){
   const gs = BY_WEEK[wk] || [], list = ids();
   const s = {games:gs.length, decided:0, veg:0, cov:0, no:0, push:0, agreed:0,
-             hit:{}, made:{}};
-  list.forEach(function(id){ s.hit[id] = 0; s.made[id] = 0; });
+             hit:{}, made:{}, played:{}};
+  list.forEach(function(id){ s.hit[id] = 0; s.made[id] = 0; s.played[id] = 0; });
   for (let i=0;i<gs.length;i++){
     const g = gs[i], picks = {};
     list.forEach(function(id){
@@ -334,7 +339,12 @@ function weekStats(wk){
     const res = resultOf(wk, g.key);
     if (!res) continue;
     s.decided++;
-    list.forEach(function(id){ if (picks[id] === res.w) s.hit[id]++; });
+    /* "played" is decided games this person actually picked. Points are still
+       scored out of every decided game - not picking costs you, as it should -
+       but a win-loss record counts only games you were there for. */
+    list.forEach(function(id){
+      if (picks[id]){ s.played[id]++; if (picks[id] === res.w) s.hit[id]++; }
+    });
     if (g.fav === res.w) s.veg++;
     const given = list.map(function(id){ return picks[id]; }).filter(Boolean);
     if (given.length > 1 && given.every(function(v){ return v === given[0]; })) s.agreed++;
@@ -358,13 +368,17 @@ function leaderOf(s){
 function seasonStats(){
   const list = ids();
   const t = {games:0, decided:0, veg:0, cov:0, no:0, push:0, agreed:0,
-             hit:{}, made:{}, weeks:[]};
-  list.forEach(function(id){ t.hit[id] = 0; t.made[id] = 0; });
+             hit:{}, made:{}, played:{}, weeks:[]};
+  list.forEach(function(id){ t.hit[id] = 0; t.made[id] = 0; t.played[id] = 0; });
   const keys = ["games","decided","veg","cov","no","push","agreed"];
   WEEKS.forEach(function(w){
     const s = weekStats(w); s.wk = w; t.weeks.push(s);
     keys.forEach(function(k){ t[k] += s[k]; });
-    list.forEach(function(id){ t.hit[id] += s.hit[id] || 0; t.made[id] += s.made[id] || 0; });
+    list.forEach(function(id){
+      t.hit[id] += s.hit[id] || 0;
+      t.made[id] += s.made[id] || 0;
+      t.played[id] += s.played[id] || 0;
+    });
   });
   return t;
 }
@@ -657,13 +671,13 @@ function applyCode(code){
 /* ------------------------------------------------------------------ render: masthead */
 function renderScoreline(){
   const s = seasonStats(), lead = leaderOf(s);
-  const rows = ids().map(function(id){ return [id, nameOf(id), s.hit[id] || 0]; });
-  rows.push(["veg", "Vegas", s.veg]);
+  const rows = ids().map(function(id){ return [id, nameOf(id), s.hit[id] || 0, s.played[id] || 0]; });
+  rows.push(["veg", "Vegas", s.veg, s.decided]);
   document.getElementById("scoreline").innerHTML =
     rows.map(function(r){
       return '<span class="sc ' + slotOf(r[0]) + (lead === r[0] ? " lead" : "") + '">' +
         '<span class="n">' + esc(r[1]) + '</span>' +
-        '<span class="v">' + r[2] + '-' + (s.decided - r[2]) + '</span></span>';
+        '<span class="v">' + r[2] + '-' + (r[3] - r[2]) + '</span></span>';
     }).join("") + '<span class="pulling" id="pulling">pulling</span>';
   let anyLive = false;
   Object.keys(LIVE).forEach(function(w){
@@ -779,7 +793,10 @@ function renderSync(){
   const ws = weekStats(state.week);
   ids().forEach(function(w){
     const you = (w === state.me);
-    const label = you ? "You" : nameOf(w);
+    /* Names come off the shared sheet, so they are somebody else's text and get
+       escaped like any other. This line is assembled as HTML for the separators,
+       which is exactly why the name has to be escaped and not merely trusted. */
+    const label = esc(you ? "You" : nameOf(w));
     const n = ws.made[w] || 0;
     /* The week is named directly above, so "this week" is noise. A timestamp on
        your own row is noise too - you know when you last touched it; what you
@@ -930,7 +947,10 @@ function renderNotice(){
   document.getElementById("mast").classList.toggle("unset", !state.me);
 }
 function renderSwap(){
-  const s = seasonStats(), bits = ["Bo has " + s.boIn + " of " + s.games + " in, Dad has " + s.dadIn + "."];
+  const s = seasonStats();
+  const bits = [ids().map(function(id){
+    return nameOf(id) + " " + (s.made[id] || 0);
+  }).join(", ") + " of " + s.games + " in."];
   ids().forEach(function(w){
     if (state.imported[w]) bits.push(nameOf(w) + "'s code loaded " + stamp(state.imported[w]) + ".");
   });
@@ -997,8 +1017,9 @@ function renderStandings(){
     '<p class="cap">Vegas picks the preseason favorite in all 272 games, so it is the pace to beat.</p>' +
     '<div class="dl">' +
       list.map(function(id){
-        const n = s.hit[id] || 0;
-        return row2(nameOf(id), n + "-" + (s.decided - n) + "  " + pct(n, s.decided));
+        const n = s.hit[id] || 0, d = s.played[id] || 0;
+        return row2(nameOf(id), n + "-" + (d - n) + "  " + pct(n, d) +
+          (d < s.decided ? "  (" + (s.decided - d) + " not picked)" : ""));
       }).join("") +
       row2("Vegas", s.veg + "-" + (s.decided - s.veg) + "  " + pct(s.veg, s.decided)) +
       list.map(function(id){
@@ -1216,7 +1237,7 @@ function setMe(who){ state.me = (state.me === who) ? null : who; LS.set("bl.me",
 
 /* ------------------------------------------------------------------ roster ui */
 function saveRoster(next, why){
-  ROSTER = next;
+  ROSTER = cleanRoster(next) || ROSTER;
   LS.set("bl.roster", ROSTER);
   /* If the person you were is no longer on the list, you are nobody again. */
   if (state.me && ids().indexOf(state.me) < 0){ state.me = null; LS.set("bl.me", null); }
@@ -1493,6 +1514,10 @@ function onSwapCopyChange(connected){
 
 /* ------------------------------------------------------------------ boot */
 function start(){
+  /* Trust nothing on the way in, including what this device stored last time. */
+  const saved = cleanRoster(LS.get("bl.roster", null));
+  if (saved) ROSTER = saved;
+  if (state.me && ids().indexOf(state.me) < 0){ state.me = null; LS.set("bl.me", null); }
   state.book = LS.get("bl.book", {}) || {};
   state.week = defaultWeek();
 
