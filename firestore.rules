@@ -12,9 +12,15 @@ rules_version = '2';
    and replaceable. The practical protection for a family sheet is that the URL
    is not advertised.
 
-   'touch' is a map of {bo|dad: serverTimestamp} written alongside every save, so
-   each phone can show when the other person last changed something. It is a
+   'touch' is a map of {player id: serverTimestamp} written alongside every save,
+   so each phone can show when the other person last changed something. It is a
    courtesy signal, not a credential: anyone who can write picks can write it.
+
+   Its cap is deliberately larger than the eight-player roster. Entries are never
+   removed, so a player who is retired and replaced leaves theirs behind; capped
+   at eight, the ninth id ever to save a week made that week's document
+   permanently unwritable, and the picks queue would have retried it every thirty
+   seconds forever while blaming the network.
 
    To lock this down properly later: enable a real sign-in provider (Google) in
    the Firebase console, then gate on the two account IDs -
@@ -34,7 +40,7 @@ service cloud.firestore {
         && (!('touch' in request.resource.data) || request.resource.data.touch is map)
         && (!('picks' in request.resource.data) || request.resource.data.picks.size() <= 16)
         && (!('results' in request.resource.data) || request.resource.data.results.size() <= 16)
-        && (!('touch' in request.resource.data) || request.resource.data.touch.size() <= 8);
+        && (!('touch' in request.resource.data) || request.resource.data.touch.size() <= 20);
     }
 
     /* The shared roster: who is playing and what each of them is called. Same

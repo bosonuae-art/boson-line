@@ -250,7 +250,8 @@ img{max-width:100%}
 /* colour distinguishes players, but it never has to carry them alone */
 .sheet-head .r{text-align:right}
 .slots{display:grid; grid-template-columns:repeat(var(--np,3),minmax(0,1fr)); gap:4px; text-align:center}
-.sheet-head .slots span{color:var(--p)}
+.sheet-head .slots span{color:var(--p); overflow:hidden; text-overflow:ellipsis;
+  white-space:nowrap}   /* same reason as .sc .n: a name must not grow the header */
 
 .game{padding:7px 2px; border-bottom:1px solid var(--rule)}
 .game.inplay{box-shadow:inset 2px 0 0 var(--live); padding-left:8px}
@@ -299,7 +300,9 @@ img{max-width:100%}
 
 .resedit{display:flex; gap:5px; align-items:center; justify-content:flex-end; flex-wrap:wrap; font-size:10px}
 .resedit button{border:1px solid var(--rule2); border-radius:2px; padding:5px 7px; font-size:10px; background:var(--raise)}
-.resedit button[aria-pressed="true"]{background:var(--hit); border-color:var(--hit); color:#fff}
+/* --hit inverts between themes, so a hardcoded white here measured 2.1:1 in
+   dark - the selected W/L toggle was effectively invisible. */
+.resedit button[aria-pressed="true"]{background:var(--hit); border-color:var(--hit); color:var(--paper)}
 .resedit input{width:46px; border:1px solid var(--rule2); border-radius:2px; padding:5px; background:var(--raise);
   color:var(--ink); font-family:"Martian Mono",monospace; font-size:10px; text-align:center}
 
@@ -567,7 +570,7 @@ details.about b{color:var(--ink); font-weight:600}
 .rlist .rname{flex:1 1 auto; min-width:0; min-height:44px; padding:0 11px;
   border:1px solid var(--rule); background:var(--raise); color:var(--ink);
   font-family:"Public Sans",ui-sans-serif,system-ui,sans-serif; font-size:15px; border-radius:2px}
-.rlist .rname:focus{outline:none; border-color:var(--gold)}
+.rlist .rname:focus-visible{border-color:var(--gold)}
 .rlist .rdel{flex:0 0 auto; width:44px; height:44px; border:1px solid var(--rule);
   background:var(--raise); color:var(--ink3); font-size:17px; line-height:1; border-radius:2px}
 .rlist .rdel:hover:not(:disabled){border-color:var(--live); color:var(--live)}
@@ -586,10 +589,15 @@ details.about b{color:var(--ink); font-weight:600}
 .rgone .rn{flex:1 1 auto; min-width:0; font-weight:600; color:var(--ink2);
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
 .rgone .rback{flex:0 0 auto; min-height:40px}
+.rgone .rback:disabled{opacity:.4; cursor:default}
 .ractions{display:flex; gap:9px; flex-wrap:wrap; margin-top:14px}
 .ractions button:disabled{opacity:.4; cursor:default}
 
 @media (max-width:840px){
+  /* Both of these sat at about 25px, well under the 44px a thumb needs, and both
+     are in strips you scroll past rather than aim at. */
+  .acts button{min-height:44px; padding:0}
+  .resedit button{min-height:44px; padding:0 10px}
   .roster{margin-top:10px; padding:13px 14px}
   .roster .rhead p{font-size:12px; margin-bottom:12px}
   .rlist .pickme .lbl{display:none}      /* the dot and the fill already say it */

@@ -30,7 +30,11 @@ function gauss(rnd){
 
 const WINNING = [17,20,20,21,23,24,24,26,27,28,30,31,34];
 
-export function buildDemo(SEED, BY_WEEK, WEEKS){
+/* `who` is the real roster's ids. The sample used to invent picks for "bo" and
+   "dad" by name, which meant anybody who added a third player - or whose ids were
+   generated rather than the original two - was shown a sample with empty columns
+   for everyone but those two. It follows the roster now, whoever is on it. */
+export function buildDemo(SEED, BY_WEEK, WEEKS, who){
   const rnd = mulberry32(20261115);
 
   /* "Now" is the afternoon of the demo week: take the slot the most games
@@ -93,15 +97,18 @@ export function buildDemo(SEED, BY_WEEK, WEEKS){
       }
       games[g.key] = out;
 
-      /* Both of them back the favourite most weeks, Dad a shade more than Bo,
-         and neither has got to the Monday night game yet. Vegas takes every
-         favourite, so it should finish a little ahead of both - which is what
-         happens in a real pool, and what the About panel already claims. */
+      /* Everyone backs the favourite most weeks, each with a slightly different
+         appetite for the underdog, and nobody has got to the Monday night game
+         yet. Vegas takes every favourite, so it should finish a little ahead of
+         the field - which is what happens in a real pool, and what the About
+         panel already claims. */
       if (!(wk === DEMO_WEEK && !isNaN(kick) && kick > now + 6 * 3600000)){
-        picks[g.key] = {
-          bo:  (market && rnd() < 0.78) ? market : dog,
-          dad: (market && rnd() < 0.83) ? market : dog
-        };
+        const cell = {};
+        who.forEach(function(id, i){
+          const lean = 0.74 + ((i * 0.037) % 0.14);
+          cell[id] = (market && rnd() < lean) ? market : dog;
+        });
+        picks[g.key] = cell;
       }
     });
 
@@ -109,10 +116,15 @@ export function buildDemo(SEED, BY_WEEK, WEEKS){
     if (Object.keys(picks).length) book[wk] = {week: wk, picks: picks, results: {}};
   });
 
+  /* Staggered so the sync line has something plausible to say about each of
+     them rather than one shared timestamp. */
+  const touch = {};
+  who.forEach(function(id, i){ touch[id] = now - (26 * 60000) * (i + 1); });
+
   return {
     now: now,
     live: live,
     book: book,
-    touch: {bo: now - 2 * 3600000, dad: now - 26 * 60000}
+    touch: touch
   };
 }

@@ -108,8 +108,14 @@ export function applyOp(doc, op){
        back to a column, and no phone should be able to leave the others with
        one. */
     if (!gone || players.length <= 1) return cur;
+    /* Nor once the retired list is full. It used to take the oldest entry off
+       the end to make room, which meant the thirteenth removal permanently
+       orphaned somebody's picks: their id was gone from every list, and ids are
+       random, so no screen could ever name them again. This file does not
+       delete people, so it refuses instead. */
+    if (retired.length >= MAX_RETIRED) return cur;
     return {players: without(players, id),
-            retired: [gone].concat(without(retired, id)).slice(0, MAX_RETIRED)};
+            retired: [gone].concat(without(retired, id))};
   }
 
   if (op.t === "restore"){

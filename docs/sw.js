@@ -6,19 +6,26 @@
    is edited far more often than it is opened on a train. Only same-origin GETs
    are touched: ESPN, Google Fonts and Firestore are left to the browser, which
    already handles their caching and must not be served a stale score. */
-const VERSION = "bl-2026-09-6";
+const VERSION = "bl-2026-09-7";
 const SHELL = [
   "./", "./index.html", "./manifest.webmanifest",
   "./assets/styles.css", "./assets/app.js", "./assets/store.js", "./assets/roster.js",
   "./assets/data.js", "./assets/demo.js", "./config.js",
-  "./icons/icon-192.png", "./icons/apple-touch-icon.png"
+  "./icons/icon-192.png", "./icons/icon-512.png",
+  "./icons/icon-maskable-512.png", "./icons/apple-touch-icon.png"
 ];
 
+/* Cached one at a time rather than with addAll, which is all-or-nothing: a
+   single renamed or 404ing entry threw the whole install away, and the catch
+   below still activated - at which point 'activate' deleted every older cache
+   and left the phone with no offline shell at all until its next good load. */
 self.addEventListener("install", function(e){
   e.waitUntil(
-    caches.open(VERSION)
-      .then(function(c){ return c.addAll(SHELL); })
-      .then(function(){ return self.skipWaiting(); })
+    caches.open(VERSION).then(function(c){
+      return Promise.all(SHELL.map(function(url){
+        return c.add(url).catch(function(){});
+      }));
+    }).then(function(){ return self.skipWaiting(); })
       .catch(function(){ return self.skipWaiting(); })
   );
 });

@@ -15,6 +15,13 @@ import { cleanDoc, applyOp } from "./roster.js";
 const SDK = "https://www.gstatic.com/firebasejs/11.10.0/";
 const SEASON = "2026";
 
+/* Whether this build has a shared sheet at all. connect() returns null both when
+   there is no project configured and when the SDK cannot be fetched, and the two
+   mean opposite things to anything holding unsent work. */
+export function configured(){
+  return !!(firebaseConfig && firebaseConfig.projectId);
+}
+
 function weekOf(id){
   const n = Number(String(id).replace(/^w/, ""));
   return (n >= 1 && n <= 18) ? n : null;
@@ -26,7 +33,7 @@ export async function connect(opts){
   const onRosterFail = opts.onRosterFail || function(){};
   const seed = opts.seed, rosterSeed = opts.rosterSeed;
 
-  if (!firebaseConfig || !firebaseConfig.projectId){
+  if (!configured()){
     onStatus("local", "On this device");
     return null;
   }
@@ -124,7 +131,10 @@ export async function connect(opts){
     /* Firestore echoes a local write back immediately, before the server has
        taken it. Only a snapshot with no writes still in flight proves the shared
        sheet really holds this - which is what the app needs to say "saved". */
-    const confirmed = !snap.metadata.hasPendingWrites;
+    /* Also not from cache. A cache-only snapshot carries no news from the
+        server, and treating it as confirmation let the app reconcile unsent
+        picks against stale data and burn its one-shot flush on nothing. */
+    const confirmed = !snap.metadata.hasPendingWrites && !snap.metadata.fromCache;
     snap.forEach(function(d){
       const wk = weekOf(d.id);
       if (!wk) return;
@@ -165,11 +175,26 @@ export async function connect(opts){
      replayed later; every op is idempotent, so replaying one that already landed
      changes nothing. After six failed attempts it is given up on and said so,
      rather than spinning forever against a rule that will never accept it. */
-  const rq = [];
+  /* Kept on disk, not just in memory. A rename made in a tunnel used to vanish
+     when the tab was closed, and the next snapshot then quietly put the old name
+     back with nothing said - the same shape of loss the picks queue was already
+     hardened against. */
+  const RQ_KEY = "bl.rq";
+  function rqLoad(){
+    try {
+      const v = JSON.parse(localStorage.getItem(RQ_KEY) || "[]");
+      return Array.isArray(v) ? v.filter(function(j){ return j && j.op; }) : [];
+    } catch (e){ return []; }
+  }
+  function rqSave(){
+    try { localStorage.setItem(RQ_KEY, JSON.stringify(rq)); } catch (e){}
+  }
+  const rq = rqLoad();
   let rDraining = false, rBackoff = 2000;
 
   function rosterOp(op){
     rq.push({op: op, tries: 0});
+    rqSave();
     drainRoster();
     return Promise.resolve();
   }
@@ -189,6 +214,12 @@ export async function connect(opts){
         await fs.runTransaction(db, async function(tx){
           const snap = await tx.get(rosterRef);
           const next = applyOp(cleanDoc(snap.exists() ? snap.data() : null), job.op);
+          /* The rules require at least one player, so writing an empty list is
+             rejected - and the op would then retry six times and be given up on,
+             leaving the roster permanently unwritable. That only happens against
+             a missing or malformed document, where the right move is to leave it
+             for the seed rather than fight it. */
+          if (!next.players.length) return;
           tx.set(rosterRef, {
             players: next.players,
             retired: next.retired,
@@ -196,11 +227,14 @@ export async function connect(opts){
           }, {merge: false});
         });
         rq.shift();
+        rqSave();
         rBackoff = 2000;
       } catch (e){
         job.tries++;
+        rqSave();
         if (job.tries >= 6){
           rq.shift();
+          rqSave();
           rBackoff = 2000;
           onRosterFail(job.op);
           continue;

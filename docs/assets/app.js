@@ -3,7 +3,7 @@
    picks live in a shared Firestore ledger when one is configured and in
    localStorage either way. */
 import { SCHED, BYES, ACCENTS, SLUG, SEED, SEED_AT } from "./data.js";
-import { connect } from "./store.js";
+import { connect, configured } from "./store.js";
 import { buildDemo, DEMO_WEEK } from "./demo.js";
 import { MAX_PLAYERS, cleanDoc, applyOp, applyOps } from "./roster.js";
 
@@ -118,7 +118,7 @@ function setDemo(on, silent){
   on = !!on;
   if (on === demo.on) return;
   if (on){
-    const d = buildDemo(SEED, BY_WEEK, WEEKS);
+    const d = buildDemo(SEED, BY_WEEK, WEEKS, ids());
     real.live = LIVE;
     real.book = state.book;
     real.touch = Object.assign({}, TOUCH);
@@ -126,7 +126,7 @@ function setDemo(on, silent){
     demo.now = d.now;
     LIVE = d.live;
     state.book = d.book;
-    ids().forEach(function(id){ TOUCH[id] = d.touch[id] || d.touch.bo || 0; });
+    ids().forEach(function(id){ TOUCH[id] = d.touch[id] || 0; });
     state.week = DEMO_WEEK;
   } else {
     demo.on = false;
@@ -149,6 +149,9 @@ function weekByDate(){
   const days = Math.floor((nowMs() - SEASON_START) / 86400000);
   return Math.min(18, Math.max(1, Math.floor(days / 7) + 1));
 }
+/* A fortnight past the last kickoff of week 18: long enough for every result to
+   have settled, early enough that nobody is still refreshing it. */
+function seasonOver(){ return nowMs() > weekEnd(18) + 14 * 86400000; }
 function defaultWeek(){
   for (let i=0;i<WEEKS.length;i++){
     const w = WEEKS[i], gs = BY_WEEK[w];
@@ -185,7 +188,14 @@ function parseEvent(e, wk){
   if (!KEYS_BY_WEEK[wk] || !KEYS_BY_WEEK[wk][key]) return null;
 
   const st = (c.status && c.status.type) || {};
-  const g = {k:c.date, st:st.state};
+  const g = {st:st.state};
+  /* ESPN publishes the whole of week 18 as TBD at midnight ET until the flexed
+     times are set. Trusting that date locks every game roughly thirteen hours
+     before it is actually played, which would make the last week of the season
+     unpickable on the Sunday morning. No kickoff is better than a wrong one:
+     without `k` the game locks at the end of the week instead. */
+  const tbd = /TBD/i.test(String(st.shortDetail || "")) || /T05:00/.test(String(c.date || ""));
+  if (!tbd) g.k = c.date;
   if (st.shortDetail) g.det = String(st.shortDetail);
   if (g.st === "in" || g.st === "post"){
     const as = parseInt(by.away.score, 10), hs = parseInt(by.home.score, 10);
@@ -236,7 +246,16 @@ async function pullWeek(wk, force){
       if (p) games[p.key] = p.g;
     });
     if (Object.keys(games).length){
-      LIVE[wk] = {week:wk, fetched:new Date().toISOString(), games:games};
+      /* Merge, never replace. ESPN occasionally returns a partial events list,
+         or renames one club's abbreviation so that game no longer matches the
+         schedule - and replacing the week wholesale then threw away the kickoff
+         time and score already cached for every game that did not come back.
+         A game with no kickoff falls back to the end-of-week lock, so it stayed
+         pickable straight through its own kickoff and final, and quietly left
+         the standings. Merging keeps the last good copy of anything missing. */
+      const had = (LIVE[wk] && LIVE[wk].games) || {};
+      LIVE[wk] = {week:wk, fetched:new Date().toISOString(),
+                  games:Object.assign({}, had, games)};
       LS.set("bl.live", LIVE);
       render();
     }
@@ -443,7 +462,11 @@ const PEND = LS.get("bl.pend", {}) || {};
    moved past - and replaying the latter on load silently overwrites whatever the
    other person did in between. Anything older than this is not anyone's live
    intention any more. */
-const PEND_MAX_AGE = 12 * 3600 * 1000;
+/* A pick waiting to be sent is deleted once it is this old. Twelve hours was
+   short enough to lose a Sunday pick made in a tunnel and not reopened until
+   Monday evening; a week means the entry outlives any plausible outage, and the
+   worst case is a stale entry rather than a lost pick. */
+const PEND_MAX_AGE = 7 * 24 * 3600 * 1000;
 function pendSave(){ LS.set("bl.pend", PEND); }
 function pendVal(cell, who){
   const e = cell && cell[who];
@@ -478,14 +501,21 @@ function pendReconcile(wk, remotePicks, remoteAt){
       const want = pendVal(cell, who) || null;
       const at = pendAt(cell, who);
       const remote = (remotePicks[key] && remotePicks[key][who]) || null;
-      /* Drop it when the sheet already agrees; when the sheet was written after
-         this edit was made, in which case the sheet is the newer intention and
-         wins; or when it is simply too old to be anybody's intention. Entries
-         saved before stamps existed have at = 0 and fall out here. */
-      const confirmed  = (want === remote);
-      const superseded = remoteAt > 0 && remoteAt > at;
-      const stale      = (now - at) > PEND_MAX_AGE;
-      if (confirmed || superseded || stale) delete cell[who];
+      /* Drop it only when the sheet already agrees, or when it is so old that
+         it cannot be anybody's live intention.
+
+         There used to be a third rule: drop it if the week document was written
+         after this edit was made, on the theory that the sheet is the newer
+         intention. But updatedAt is stamped on the WEEK, not on the cell, so it
+         moves whenever anybody saves anything in that week. Bo picking a game
+         with no signal, Martin then editing a different game, and Bo reopening
+         was enough to throw Bo's pick away before it had ever been sent - gone
+         from the phone and never on the sheet. There is no per-cell remote
+         stamp to compare against, so the rule is gone: an unsent edit now waits
+         until the sheet actually confirms it. */
+      const confirmed = (want === remote);
+      const stale     = (now - at) > PEND_MAX_AGE;
+      if (confirmed || stale) delete cell[who];
     });
     if (!Object.keys(cell).length) delete w[key];
   });
@@ -644,6 +674,10 @@ function decodePicks(code){
    there is read first and offered back, and the count says how much of the sheet
    actually moved rather than just how big the code was. */
 function applyCode(code){
+  /* setPicks writes state.book, which IS the sample's book while it is up, and
+     persist() saves the real one - so a season pasted in here was silently
+     dropped the moment the sample closed, after saying it had loaded. */
+  if (demo.on){ flash("Leave the sample before loading a sheet."); return; }
   const d = decodePicks(code);
   if (!d){ flash("That code didn't read right. Copy the whole thing and try again."); return; }
   const prev = {};
@@ -1248,6 +1282,10 @@ function setMe(who){ state.me = (state.me === who) ? null : who; LS.set("bl.me",
    so the panel never lags a tap, and sent as the same op to be replayed against
    whatever the shared sheet holds when it arrives. Nothing sends a whole list. */
 function rosterEdit(op){
+  /* The sample promises that nothing in it is saved or shared, and the roster is
+     the one real thing on screen while it is up. Adding a player to show Dad what
+     it looks like must not add them to everybody's actual sheet. */
+  if (demo.on){ flash("Leave the sample to change the player list."); return; }
   const next = applyOp({players: ROSTER, retired: RETIRED}, op);
   ROSTER = next.players;
   RETIRED = next.retired;
@@ -1265,7 +1303,12 @@ function openRoster(open){
   const el = document.getElementById("roster");
   el.hidden = !open;
   document.getElementById("whoBtn").setAttribute("aria-expanded", String(!!open));
-  if (open) renderRoster();
+  if (!open) return;
+  renderRoster();
+  /* The button that opens this sits in a masthead that is pinned to the top of
+     the screen; the panel it opens sits at the top of the document. Ten games
+     down, tapping it appeared to do nothing at all. */
+  el.scrollIntoView({block: "start", behavior: "smooth"});
 }
 /* Removing somebody takes two taps on the same button: the first arms it and
    says so, the second does it. A single tap on a 44px target next to a name
@@ -1311,6 +1354,7 @@ function renderRoster(){
     '<ul>' + RETIRED.map(function(p){
       return '<li><span class="rn">' + esc(p.name) + '</span>' +
         '<button type="button" class="btn rback" data-id="' + esc(p.id) + '"' +
+        ' aria-label="Bring back ' + esc(p.name) + '"' +
         (ROSTER.length >= MAX_PLAYERS ? " disabled" : "") + '>Bring back</button></li>';
     }).join("") + '</ul>';
 }
@@ -1522,7 +1566,10 @@ function mergeRemote(wk, doc, confirmed){
   const marks = demo.on ? real.touch : TOUCH;
   ids().forEach(function(w){
     const ms = tsMillis(t[w]);
-    if (marks && ms > marks[w]) marks[w] = ms;
+    /* marks[w] starts undefined, and `ms > undefined` is false for every ms, so
+       this silently never recorded anything outside the sample - which is why
+       "Martin picked four minutes ago" had never once appeared in a real week. */
+    if (marks && ms > (marks[w] || 0)) marks[w] = ms;
   });
 
   /* Anything the other person changed since the last snapshot gets a moment of
@@ -1582,7 +1629,12 @@ function start(){
   render();
   pullWeek(state.week, true);
   setInterval(function(){ state.now = nowMs(); render(); }, 30000);
-  setInterval(function(){ if (state.tab === "picks") pullWeek(state.week); }, 20000);
+  /* Stop once the season is over. Otherwise the app pins to week 18 and keeps
+     asking ESPN for it every twenty seconds, indefinitely, into a year whose
+     schedule this build knows nothing about. */
+  setInterval(function(){
+    if (state.tab === "picks" && !seasonOver()) pullWeek(state.week);
+  }, 20000);
   document.addEventListener("visibilitychange", function(){
     if (document.hidden) return;
     /* Coming back to the tab: redraw before waiting on the network. A page that
@@ -1639,8 +1691,13 @@ function start(){
     if ("serviceWorker" in navigator){
       navigator.serviceWorker.register("./sw.js").catch(function(){});
     }
-    if (!s) purgePending();
+    /* Only when this build genuinely has no shared sheet to send to. connect()
+       also returns null when the Firebase SDK simply fails to download - which
+       is exactly what happens opening the app offline, the service worker having
+       served the page - and purging there destroyed the record that picks still
+       needed sending while leaving the picks themselves on screen. */
+    if (!s && !configured()) purgePending();
     render();
-  }).catch(function(){ purgePending(); render(); });
+  }).catch(function(){ if (!configured()) purgePending(); render(); });
 }
 start();

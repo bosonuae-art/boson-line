@@ -189,19 +189,25 @@ you are looking at the week is visible rather than merely present.
 **There is no sign-in.** Anonymous auth was the obvious thing to require, but it is not a real gate —
 anyone can mint an anonymous token in one call — and enabling it meant turning on Identity Platform, a
 separate paid product, for no security gain. `firestore.rules` carries the restriction instead: a caller
-can only touch those 18 documents, can only store the three fields the app writes, and is refused
-everywhere else in the project. Verified against the live project:
+can only touch the 18 week documents and the roster document of this one season, can only store the
+fields the app writes, and is refused everywhere else in the project. Verified against the live project:
 
 | Request | Result |
 |---|---|
 | write a valid week (`w2`, `picks`) | accepted |
-| write `touch.bo` / `touch.dad` | accepted |
-| write `touch.pete` (a third name) | rejected |
+| write `touch` as a map of player ids | accepted |
+| write a roster with `players` + `retired` | accepted |
+| write a roster with an empty `players` list | rejected |
+| write a roster with an unknown field | rejected |
 | write a bogus week id (`w99`) | rejected |
 | write an unknown field | rejected |
 | write `touch` as a string, not a map | rejected |
 | write another collection | rejected |
 | write another season (`2027`) | rejected |
+
+The rules constrain the *shape* of what is stored, not who stores it. They do not check which player id a
+`touch` entry names, and could not usefully — there is no sign-in, so there is nothing to check it against.
+An earlier version of this table claimed `touch.pete` was rejected; it never was.
 
 Deletes are refused too, as a side effect rather than by design: the rule reads
 `request.resource.data.keys()`, and on a delete there is no `request.resource`. Clearing a field means
@@ -257,10 +263,13 @@ have been scriptable.
 | `docs/assets/app.js` | The whole app: schedule, picks, scoring, ESPN fetching, rendering. |
 | `docs/assets/store.js` | Firestore bridge. Degrades to local-only if no project is configured. |
 | `docs/assets/data.js` | Generated. Schedule, byes, club accents, logo slugs, and a seed ESPN snapshot for first paint. |
-| `docs/assets/styles.css` | Shared stylesheet (also the source for the artifact build's inline CSS). |
+| `docs/assets/roster.js` | Who is playing, as a value: the op reducer, and the bounds every roster is scrubbed against. |
+| `docs/assets/demo.js` | The sample season, generated at runtime from a fixed seed. |
+| `docs/assets/styles.css` | The stylesheet. |
+| `docs/sw.js` | Service worker: network-first, cache fallback, so the sheet opens offline. |
 | `docs/config.js` | Firebase config. Yours to fill in. |
-| `firestore.rules` | Paste into the Firebase console. |
-| `template.html` / `index.html` | Artifact source and build. Edit the template, never `index.html`. |
+| `firestore.rules` | Deploy with `firebase deploy --only firestore:rules`. Never edit rules in the console. |
+| `template.html` / `index.html` | **Stale.** The retired claude.ai artifact and its source, frozen several commits back — two hardcoded players, no roster, no sample, no PWA. Nothing in `docs/` reads either. |
 | `bo_code.txt` | Bo's 271 picks as a pick code, rescued from the artifact database. |
 
 ### tools/

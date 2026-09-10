@@ -56,7 +56,7 @@
     and two people editing at once no longer overwrite each other.</p>
   </div>
   <ul class="rlist" id="rlist"></ul>
-  <div class="rgone" id="rgone" hidden></div>
+  <div class="rgone" id="rgone" aria-live="polite" hidden></div>
   <div class="ractions">
     <button type="button" class="btn" id="addPlayer">Add a player</button>
     <button type="button" class="btn key" id="rosterDone">Done</button>
@@ -65,9 +65,14 @@
 
 <div class="demobar" id="demobar" role="status" hidden></div>
 
+<!-- Outside the panels on purpose. This is where a removal is confirmed and its
+     Undo offered, and it used to sit inside the Picks panel - which setTab marks
+     hidden, so removing a player from the Standings tab silently swallowed both
+     the message and the only way back. -->
+<div id="notice" role="status" aria-live="polite"></div>
+
 <main class="wrap">
   <section id="pane-picks" role="tabpanel" aria-labelledby="tab-picks">
-    <div id="notice"></div>
     <div class="whead">
       <div class="wnav">
         <button type="button" class="warrow" id="weekPrev" aria-label="Previous week">&lsaquo;</button>
@@ -91,7 +96,7 @@
     <div class="sheet-head">
       <span class="colhead">Kickoff</span>
       <span class="colhead">Matchup</span>
-      <span class="slots colhead"><span>Bo</span><span>Dad</span><span>Vegas</span></span>
+      <span class="slots colhead"></span>
       <span class="colhead r">Line</span>
       <span class="colhead r">Score</span>
     </div>
