@@ -88,7 +88,8 @@ button{font:inherit; color:inherit; cursor:pointer; background:none; border:none
 :focus-visible{outline:2px solid var(--gold); outline-offset:3px}
 h2,h3{text-wrap:balance; margin:0}
 img{max-width:100%}
-.wrap{max-width:1060px; margin:0 auto; padding-inline:20px; padding-block:0 64px}
+.wrap{max-width:1060px; margin:0 auto; padding-block:0 64px;
+  padding-inline:calc(20px + var(--sal)) calc(20px + var(--sar))}
 [hidden]{display:none !important}
 
 /* the mono voice: eyebrows, column heads, codes and figures - nothing else */
@@ -173,9 +174,25 @@ img{max-width:100%}
 }
 
 /* ------------------------------------------------------------------ masthead */
+/* The strips a handset keeps for itself: the status bar and camera housing at
+   the top, the home indicator at the bottom, and the rounded corners either side
+   in landscape. Named here rather than called inline so the layout can be tested
+   at a desktop size by overriding them, where env() is always zero.
+
+   The top one was missing entirely. With viewport-fit=cover the web view runs the
+   full height of the screen, so the masthead was drawn underneath the clock and
+   the battery: on an iPhone the title row and the scoreline sat behind them. */
+:root{
+  --sat:env(safe-area-inset-top, 0px);
+  --sab:env(safe-area-inset-bottom, 0px);
+  --sal:env(safe-area-inset-left, 0px);
+  --sar:env(safe-area-inset-right, 0px);
+}
 .mast{background:color-mix(in srgb, var(--sheet) 88%, transparent); backdrop-filter:blur(9px);
-  border-bottom:1px solid var(--rule2); position:sticky; top:0; z-index:20}
-.mast-row{max-width:1060px; margin:0 auto; padding:0 20px; display:flex; align-items:center; gap:16px}
+  border-bottom:1px solid var(--rule2); position:sticky; top:0; z-index:20;
+  padding-top:var(--sat)}
+.mast-row{max-width:1060px; margin:0 auto; display:flex; align-items:center; gap:16px;
+  padding:0 calc(20px + var(--sar)) 0 calc(20px + var(--sal))}
 .mast-row.one{padding-top:12px; padding-bottom:10px}
 .mast-row.two{border-top:1px solid var(--rule)}
 .word{font-family:"Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif; font-weight:600;
@@ -444,7 +461,15 @@ details.about b{color:var(--ink); font-weight:600}
   .whead .acts::-webkit-scrollbar{display:none}
   .demobar{margin-top:10px; font-size:12px}
   .resedit{justify-content:flex-start}
-  .scoreline{gap:16px; width:100%; margin-left:0}
+  /* One row that scrolls, not a block that wraps. With four players the records
+     wrapped onto a second line and, together with the status strip an iPhone
+     keeps for its clock, pushed the first game most of the way down the screen.
+     Sideways is cheap here; vertical space is not. */
+  .scoreline{gap:16px; width:100%; margin-left:0; flex-wrap:nowrap;
+    overflow-x:auto; scrollbar-width:none; -ms-overflow-style:none}
+  .scoreline::-webkit-scrollbar{display:none}
+  .sc{flex:0 0 auto}
+  .mast-row.one{padding-top:10px; padding-bottom:8px}
   .mast-row.one{flex-wrap:wrap; gap:9px}
   .word{font-size:21px}
   .whead h2{font-size:27px}
@@ -462,12 +487,12 @@ details.about b{color:var(--ink); font-weight:600}
     display:flex; justify-content:stretch;
     background:color-mix(in srgb, var(--sheet) 94%, transparent); backdrop-filter:blur(10px);
     border-top:1px solid var(--rule2);
-    padding-bottom:env(safe-area-inset-bottom)}
+    padding:0 var(--sar) var(--sab) var(--sal)}
   .tabs button{flex:1 1 0; text-align:center; padding:13px 4px 12px; font-size:12px;
     border-bottom:none; margin-bottom:0; border-top:2px solid transparent; margin-top:-1px}
   .tabs button[aria-selected="true"]{border-bottom-color:transparent; border-top-color:var(--gold)}
   /* room for the bar, plus whatever the handset puts below it */
-  .wrap{padding-block:0 calc(78px + env(safe-area-inset-bottom))}
+  .wrap{padding-block:0 calc(78px + var(--sab))}
 
   /* ------------------------------------------------------------ week control
      Eighteen 40px targets in a strip that opens scrolled to week one is a poor
@@ -523,7 +548,12 @@ details.about b{color:var(--ink); font-weight:600}
   font-family:"Martian Mono",monospace; font-size:9px; letter-spacing:.14em;
   text-transform:uppercase; color:var(--ink3); opacity:0; transition:opacity .25s}
 .pulling.on{opacity:1; max-width:90px; margin-left:4px}
-@media (max-width:840px){ .status .txt{display:none} }
+/* Hidden outright on a phone, not just stripped of its label: without the text
+   it is a lone 6px dot in the masthead that reads as a rendering artefact, and
+   the strip under the week already says "Everything saved" in words.
+   This has to sit after the .status rule above - same specificity, so source
+   order is what decides it. */
+@media (max-width:840px){ .status{display:none} }
 
 /* ------------------------------------------------------------------ narrow phones
    The masthead's second row (tabs + status + identity) is the one thing that
@@ -538,8 +568,8 @@ details.about b{color:var(--ink); font-weight:600}
   .ident .lab{display:none}
   .weeks button{padding:10px 0 11px; min-width:42px}   /* thumb-sized week switching */
   .tabs{gap:14px}
-  .mast-row{padding-inline:16px}
-  .wrap{padding-inline:16px}
+  .mast-row{padding-inline:calc(16px + var(--sal)) calc(16px + var(--sar))}
+  .wrap{padding-inline:calc(16px + var(--sal)) calc(16px + var(--sar))}
   .whead h2{font-size:24px}
   .word{font-size:19px}
   .word .yr{margin-left:7px}

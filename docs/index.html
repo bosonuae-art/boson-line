@@ -15,7 +15,11 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Boson Line">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<!-- Not black-translucent. That draws the clock and battery in white over
+     whatever the page puts there, which is right in dark mode and illegible in
+     light, where this masthead is #f6f7f3. "default" gives the strip back to iOS,
+     which tints it from theme-color above and always picks a readable colour. -->
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="preconnect" href="https://a.espncdn.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700&family=Martian+Mono:wght@400;500;600&family=Public+Sans:wght@400;500;600&display=swap">

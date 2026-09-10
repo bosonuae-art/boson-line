@@ -4,20 +4,18 @@ A pick sheet for Bo and Dad, built from Pete Holland's 2026 NFL workbook.
 Bo vs Dad vs Vegas, one point per correct call, same scoring as the spreadsheet.
 
 **Site:** https://bosonuae-art.github.io/boson-line/
-**Artifact (older, private):** https://claude.ai/code/artifact/49b2c07f-1e36-45d4-867a-e0721a76ef5e
 
-## Two builds, one set of data
+## One build
 
-| | `docs/` — GitHub Pages | `index.html` — claude.ai artifact |
-|---|---|---|
-| Shareable | Any link | Only inside the owner's org |
-| Odds & scores | Fetched live from ESPN in the browser | Baked in; needs a republish to refresh |
-| Club marks | Loaded from ESPN's CDN | Embedded as data URIs (~260 KB) |
-| Shared picks | Firestore, live between both phones | None — pick codes only |
+Everything ships from `docs/` to GitHub Pages. Odds and scores are fetched live from ESPN in the
+browser, club marks come from ESPN's CDN, and picks sync through Firestore.
 
-The artifact came first and is kept because it still works. The Pages site exists because
-**the artifact sandbox blocks every network call** — no `fetch`, no external images — which is
-also why a `db`-backed artifact can't be link-shared at all. A plain static page has neither limit.
+There used to be a second target: a claude.ai artifact, built by `tools/build.py` from a `template.html`
+that carried its own inlined copy of the app. It came first, and the Pages site was added because
+**the artifact sandbox blocks every network call** — no `fetch`, no external images — so odds had to be
+baked in and republished by hand. Keeping both meant making every change twice, and the artifact had
+rotted several commits behind: two hardcoded players, no roster, no sample season, no offline support.
+It was removed from the repo, and is in the git history if it is ever wanted back.
 
 ## Players
 
@@ -269,7 +267,6 @@ have been scriptable.
 | `docs/sw.js` | Service worker: network-first, cache fallback, so the sheet opens offline. |
 | `docs/config.js` | Firebase config. Yours to fill in. |
 | `firestore.rules` | Deploy with `firebase deploy --only firestore:rules`. Never edit rules in the console. |
-| `template.html` / `index.html` | **Stale.** The retired claude.ai artifact and its source, frozen several commits back — two hardcoded players, no roster, no sample, no PWA. Nothing in `docs/` reads either. |
 | `bo_code.txt` | Bo's 271 picks as a pick code, rescued from the artifact database. |
 
 ### tools/
@@ -277,11 +274,10 @@ have been scriptable.
 | Script | Run when |
 |---|---|
 | `gen.py` | Once. Reads `2026 NFL .xlsx` → `data2026.json` (272 games, preseason lines, byes). |
-| `logos.py` | Once. Downloads 32 club marks (light + dark), scales and base64-encodes → `logos.json`. |
+| `logos.py` | Once. Downloads 32 club marks (light + dark), scales and base64-encodes → `logos.json`. The base64 images were only ever used by the retired artifact build; `build_site.py` reads the accents. |
 | `accents.py` | Once, after `logos.py`. Derives a theme-safe accent per club. |
-| `sync.py` | Before an artifact republish. Pulls all 18 weeks from ESPN → `live/`. |
+| `sync.py` | Pulls all 18 weeks from ESPN → `live/`, which `build_site.py` reads. |
 | `build_site.py` | After `sync.py` or a schedule change → `docs/assets/data.js`. |
-| `build.py` | After `sync.py` → `index.html` for the artifact. |
 
 `accents.py` exists because raw brand hex doesn't survive both themes: the Raiders and Steelers are
 `#000000` and vanish on the dark ground, the Saints are `#d3bc8d` and vanish on the light one. It keeps
