@@ -51,7 +51,7 @@ const LS = {
    roster is shared through Firestore, because a player Dad adds has to exist on
    Bo's phone too - a local-only roster would give each of them columns the other
    could not see. Eight is the cap, which is where the colour slots run out. */
-const DEFAULT_ROSTER = [{id:"bo", name:"Bo"}, {id:"dad", name:"Martin"}];
+const DEFAULT_ROSTER = [{id:"bo", name:"Bo"}, {id:"dad", name:"Dad"}];
 let ROSTER = DEFAULT_ROSTER.map(function(p){ return {id:p.id, name:p.name}; });
 /* Removed players. They are not deleted anywhere - not here, not on the shared
    sheet, and above all not in the picks - so bringing one back restores their
@@ -508,7 +508,7 @@ function pendReconcile(wk, remotePicks, remoteAt){
          after this edit was made, on the theory that the sheet is the newer
          intention. But updatedAt is stamped on the WEEK, not on the cell, so it
          moves whenever anybody saves anything in that week. Bo picking a game
-         with no signal, Martin then editing a different game, and Bo reopening
+         with no signal, Dad then editing a different game, and Bo reopening
          was enough to throw Bo's pick away before it had ever been sent - gone
          from the phone and never on the sheet. There is no per-cell remote
          stamp to compare against, so the rule is gone: an unsent edit now waits
@@ -1568,7 +1568,7 @@ function mergeRemote(wk, doc, confirmed){
     const ms = tsMillis(t[w]);
     /* marks[w] starts undefined, and `ms > undefined` is false for every ms, so
        this silently never recorded anything outside the sample - which is why
-       "Martin picked four minutes ago" had never once appeared in a real week. */
+       "Dad picked four minutes ago" had never once appeared in a real week. */
     if (marks && ms > (marks[w] || 0)) marks[w] = ms;
   });
 

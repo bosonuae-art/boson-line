@@ -1,6 +1,6 @@
 # The Boson Line — 2026 NFL pick'em
 
-A pick sheet for Bo and Dad, built from Pete Holland's 2026 NFL workbook.
+A pick sheet for Bo and Dad, adapted from a friend's 2026 NFL workbook.
 Bo vs Dad vs Vegas, one point per correct call, same scoring as the spreadsheet.
 
 **Site:** https://bosonuae-art.github.io/boson-line/
@@ -21,7 +21,7 @@ It was removed from the repo, and is in the git history if it is ever wanted bac
 
 Players are a list, not two hardcoded columns. **Ids are permanent** and are what
 picks are filed under; **names are labels** and anyone can change them. That split
-is what let Dad become Martin without touching a single stored pick — the id is
+is what let the second player's label change without touching a single stored pick — the id is
 still `dad`.
 
 The roster lives in Firestore at `seasons/2026/meta/roster`, not in `localStorage`,
